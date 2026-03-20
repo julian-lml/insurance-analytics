@@ -1,0 +1,18 @@
+# Virtual environment
+venv/
+
+# Data files (sensitive client data - never upload)
+data/
+*.csv
+*.xlsx
+
+# Environment variables (API keys - never upload)
+.env
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# VS Code settings
+.vscode/
