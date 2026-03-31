@@ -1,0 +1,30 @@
+# Environment
+.env
+
+# Credentials — never commit
+credentials/
+config/agents.yaml
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Data — raw downloads and outputs stay local
+data/raw/
+data/output/
+data/state/
+
+# Logs
+logs/
+status/
+
+# Firecrawl cache
+.firecrawl/
+
+# OS
+.DS_Store
+Thumbs.db
