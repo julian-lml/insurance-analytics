@@ -14,6 +14,9 @@ Lower-level functions (also importable):
 Env vars (.env):
     GOOGLE_SERVICE_ACCOUNT_JSON  path to service account JSON (default: credentials/service_account.json)
     DRIVE_FOLDER_ID              Google Drive folder that receives monthly sheets
+    SHEET_ID_{MONTH}_{YEAR}      pin an existing sheet ID and skip Drive file creation entirely
+                                 e.g. SHEET_ID_APRIL_2026=1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms
+                                 Use when Drive returns storageQuotaExceeded on file creation.
 
 Standalone test:
     python scripts/sheets_writer.py
@@ -139,7 +142,7 @@ def _create_month_sheet(sheets, drive, folder_id: str, name: str) -> str:
         "mimeType": "application/vnd.google-apps.spreadsheet",
         "parents": [folder_id],
     }
-    file = drive.files().create(body=file_meta, fields="id").execute()
+    file = drive.files().create(body=file_meta, fields="id", supportsAllDrives=True).execute()
     sheet_id = file["id"]
     log.info(f"Created new sheet '{name}' (id={sheet_id})")
 
@@ -189,12 +192,66 @@ def _create_month_sheet(sheets, drive, folder_id: str, name: str) -> str:
     return sheet_id
 
 
+def _read_a1(sheets, sheet_id: str, tab: str) -> str:
+    """Return the value of cell A1 in the given tab, or '' if empty."""
+    resp = sheets.spreadsheets().values().get(
+        spreadsheetId=sheet_id,
+        range=f"'{tab}'!A1",
+    ).execute()
+    values = resp.get("values", [])
+    return values[0][0] if (values and values[0]) else ""
+
+
+def _ensure_tab_headers(sheets, sheet_id: str) -> None:
+    """
+    Write header rows to tabs whose A1 does not match the expected header.
+    Compares A1 against the first header string — distinguishes correct headers
+    from empty cells AND from data rows written without headers (false non-empty).
+    Safe to call every run — no-op when headers are already correct.
+    """
+    tab_headers = [
+        (TAB_SUMMARY,     SUMMARY_HEADERS),
+        (TAB_DEACTIVATED, R2_HEADERS),
+        (TAB_ACTIVE_LOG,  R1_LOG_HEADERS),
+    ]
+    writes = []
+    for tab, headers in tab_headers:
+        a1 = _read_a1(sheets, sheet_id, tab)
+        if a1 != headers[0]:
+            writes.append({"range": f"'{tab}'!A1", "values": [headers]})
+
+    if writes:
+        sheets.spreadsheets().values().batchUpdate(
+            spreadsheetId=sheet_id,
+            body={"valueInputOption": "RAW", "data": writes},
+        ).execute()
+        written = [w["range"].split("'")[1] for w in writes]
+        log.info(f"_ensure_tab_headers: wrote headers to {written}")
+    else:
+        log.info("_ensure_tab_headers: all tabs already have headers — skipped")
+
+
 def get_or_create_month_sheet(year: int, month: int) -> str:
     """
     Return the Sheets file ID for the given year/month.
-    Creates the file (3 tabs + headers) if it doesn't exist.
+
+    Resolution order:
+      1. Env var SHEET_ID_{MONTH}_{YEAR} (e.g. SHEET_ID_APRIL_2026) — skips Drive entirely.
+         Use this when Drive file creation is blocked (storageQuotaExceeded abuse prevention).
+      2. Drive folder search — finds existing sheet by name.
+      3. Drive file create — creates sheet with 3 tabs + headers.
+
     Idempotent — safe to call multiple times per run.
     """
+    month_name = date(year, month, 1).strftime("%B").upper()  # e.g. "APRIL"
+    env_key = f"SHEET_ID_{month_name}_{year}"                 # e.g. "SHEET_ID_APRIL_2026"
+    pinned_id = os.getenv(env_key, "").strip()
+    if pinned_id:
+        log.info(f"Using pinned sheet ID from env {env_key}={pinned_id}")
+        sheets, _ = _get_services()
+        _ensure_tab_headers(sheets, pinned_id)
+        return pinned_id
+
     folder_id = os.getenv("DRIVE_FOLDER_ID", "").strip()
     if not folder_id:
         raise ValueError(
@@ -209,6 +266,7 @@ def get_or_create_month_sheet(year: int, month: int) -> str:
     existing_id = _find_sheet_in_folder(drive, folder_id, name)
     if existing_id:
         log.info(f"Found existing sheet '{name}' (id={existing_id})")
+        _ensure_tab_headers(sheets, existing_id)
         return existing_id
 
     return _create_month_sheet(sheets, drive, folder_id, name)
@@ -312,12 +370,23 @@ def append_deactivated(r2_records: list[dict], sheet_id: str) -> None:
     """
     Append R2 rows to 'Deactivated This Period'.
     Empty list → no-op (no API call, no error).
+    Writes headers to row 1 first if the tab is empty.
     """
     if not r2_records:
         log.info("append_deactivated: empty list — nothing written")
         return
 
     sheets, _ = _get_services()
+
+    if _read_a1(sheets, sheet_id, TAB_DEACTIVATED) != R2_HEADERS[0]:
+        sheets.spreadsheets().values().update(
+            spreadsheetId=sheet_id,
+            range=f"'{TAB_DEACTIVATED}'!A1",
+            valueInputOption="RAW",
+            body={"values": [R2_HEADERS]},
+        ).execute()
+        log.info("append_deactivated: wrote missing headers to row 1")
+
     rows = _records_to_rows(r2_records, R2_HEADERS)
     sheets.spreadsheets().values().append(
         spreadsheetId=sheet_id,
@@ -333,12 +402,23 @@ def append_r1_log(r1_records: list[dict], sheet_id: str) -> None:
     """
     Append raw R1 rows to 'Active Members' (audit trail for Looker Studio).
     Empty list → no-op.
+    Writes headers to row 1 first if the tab is empty.
     """
     if not r1_records:
         log.info("append_r1_log: empty list — nothing written")
         return
 
     sheets, _ = _get_services()
+
+    if _read_a1(sheets, sheet_id, TAB_ACTIVE_LOG) != R1_LOG_HEADERS[0]:
+        sheets.spreadsheets().values().update(
+            spreadsheetId=sheet_id,
+            range=f"'{TAB_ACTIVE_LOG}'!A1",
+            valueInputOption="RAW",
+            body={"values": [R1_LOG_HEADERS]},
+        ).execute()
+        log.info("append_r1_log: wrote missing headers to row 1")
+
     rows = _records_to_rows(r1_records, R1_LOG_HEADERS)
     sheets.spreadsheets().values().append(
         spreadsheetId=sheet_id,
@@ -386,9 +466,29 @@ def write_run(
 # ─── Standalone test ──────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Phase 3 — Sheets writer standalone test")
-    parser.add_argument("--dry-run", action="store_true", help="Skip all Sheets writes")
+    parser = argparse.ArgumentParser(
+        description="Phase 3 — Sheets writer",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "examples:\n"
+            "  python scripts/sheets_writer.py\n"
+            "    → prints this help (no writes)\n\n"
+            "  python scripts/sheets_writer.py --test\n"
+            "    → writes 2-agent test fixture to the live sheet\n\n"
+            "  python scripts/sheets_writer.py --test --dry-run\n"
+            "    → resolves sheet ID and logs what would be written, no API writes\n\n"
+            "env vars required (.env):\n"
+            "  SHEET_ID_APRIL_2026   (or DRIVE_FOLDER_ID if not pinning)\n"
+            "  GOOGLE_SERVICE_ACCOUNT_JSON\n"
+        ),
+    )
+    parser.add_argument("--test",    action="store_true", help="Write 2-agent fixture data to the live sheet")
+    parser.add_argument("--dry-run", action="store_true", help="Resolve sheet ID but skip all Sheets writes (use with --test)")
     args = parser.parse_args()
+
+    if not args.test:
+        parser.print_help()
+        sys.exit(0)
 
     setup_logging()
 
