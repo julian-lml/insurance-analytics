@@ -50,8 +50,8 @@ Missing carrier data (failed run) = **blank cell**, never zero.
 | **Molina** | account.evolvenxt.com | user+pass, no 2FA | CSV download → sum active statuses | Same CSV, Terminated rows | Selenium | 1 | ✅ DONE |
 | **Ambetter** | broker.ambetterhealth.com | user+pass, no 2FA | Dashboard odometer | requests+cookies → base64 ZIP | Selenium + requests | 2 | ✅ DONE |
 | **Oscar** | accounts.hioscar.com | MS Authenticator (boss phone) SEMI-AUTO | CSV → sum Lives non-Inactive | Same CSV, Inactive rows + date filter | **Playwright** | 4 | ✅ DONE |
-| **Cigna** | cignaforbrokers.com | USA VPN + email 2FA (webmail.ligagent.com) | BOB filter → Total results | Portal export: Terminated + date filter | **Playwright** | 5 | ⏳ NEXT |
-| **United** | uhcjarvis.com | MS Authenticator (boss phone) SEMI-AUTO | Dashboard count | Delta diff vs state file | **Playwright** | 6 | ⏳ |
+| **Cigna** | cignaforbrokers.com | USA VPN + email 2FA (webmail.ligagent.com) | BOB filter → Total results | Portal export: Terminated + date filter | **Playwright** | 5 | ✅ DONE |
+| **United** | uhcjarvis.com | MS Authenticator (boss phone) SEMI-AUTO | Dashboard count | Delta diff vs state file | **Playwright** | 6 | ⏳ NEXT |
 
 ### Phase Order Rationale
 - **Oscar before Cigna:** Oscar is the simplest new carrier (semi-auto, single CSV, no 2FA).
@@ -295,6 +295,13 @@ date. Ambetter and Cigna use real cancellation dates.
 Dedup key `(carrier, policy_number, coverage_end_date)` prevents double-counting across
 runs. See section 6 for full explanation.
 
+**Ambetter data lag confirmed (April 9, 2026):** Justin Santa dropped 304 active members
+(763 → 459) between runs, but the Cancelled export had 0 records with `Policy Term Date
+>= 2026-03-31`. Most recent cancellation in export was 2026-03-18. Ambetter processes
+cancellations with a lag of days to weeks after members drop from the active dashboard
+count. The dedup key prevents double-counting when delayed records eventually appear in a
+later run.
+
 ---
 
 ### 8.5 Molina — Carrier Selection Flakiness (NON-BLOCKING)
@@ -437,9 +444,42 @@ Selectors removed from bot constants and config.yaml:
 python scripts/molina_downloader.py --agent 14
 python scripts/ambetter_bot.py --agent 15
 python scripts/oscar_bot.py --agent 2
+python scripts/cigna_bot.py --agent 2
 ```
 
 State file will NOT update on single-agent runs. Acceptable by design.
+
+---
+
+### 8.16 Ambetter R2 — Pagination Bug (RESOLVED)
+
+**Problem:** The Cancelled export endpoint returns 334 rows per page via an `offset`
+query parameter. The original code fetched only `offset=0`, silently dropping all
+cancelled records past row 334. Any agent with more than 334 total historical
+cancellations would have their full cancelled history truncated.
+
+**Root cause:** URL was hardcoded as `?filter=cancelled&offset=0`. No loop. No
+detection of additional pages.
+
+**Resolution:** Pagination loop in `_download_cancelled_csv()`. Increments offset by 334
+on each iteration. Termination conditions: (1) page returns fewer than 334 rows,
+(2) portal returns empty CSV in the ZIP (caught via `pd.errors.EmptyDataError`),
+(3) no base64 data URI found in modal (no more pages). All pages concatenated into a
+single DataFrame before date filter is applied.
+
+```python
+PAGE_SIZE = 334  # rows per page, confirmed from live data
+offset = 0
+while True:
+    url = BASE_URL + f"/apex/BC_VFP02_PolicyList_CSV?filter=cancelled&offset={offset}"
+    # ... fetch, decode, read CSV from ZIP in memory ...
+    log.info("ambetter | [%s] page offset=%d rows=%d", agent_name, offset, len(page_df))
+    all_rows.append(page_df)
+    if len(page_df) < PAGE_SIZE:
+        break
+    offset += PAGE_SIZE
+full_df = pd.concat(all_rows, ignore_index=True)
+```
 
 ---
 
@@ -576,8 +616,8 @@ google-auth
 | 2 | Ambetter: dashboard R1 + cancelled CSV R2 | Selenium + requests | ✅ DONE |
 | 3 | Google Sheets: Summary pivot + dual-tab writer | — | ✅ DONE |
 | 4 | Oscar: semi-auto + R1 + R2 | **Playwright** | ✅ DONE |
-| 5 | Cigna: VPN + email 2FA + R1 + R2 | **Playwright** | ⏳ NEXT |
-| 6 | United: semi-auto + delta R2 | **Playwright** | ⏳ |
+| 5 | Cigna: VPN + email 2FA + R1 + R2 | **Playwright** | ✅ DONE |
+| 6 | United: semi-auto + delta R2 | **Playwright** | ⏳ NEXT |
 | 7 | Looker Studio dashboard (6 pages) | — | ⏳ |
 | 8 | main.py orchestrator + Windows Task Scheduler | — | ⏳ |
 | 9 | Migrate Molina + Ambetter to Playwright | **Playwright** | 🔮 Future |
@@ -623,8 +663,10 @@ The overhead of adding weekday-edge logic outweighs the benefit for a rare scena
 
 ---
 
-*Last updated: April 7, 2026*
-*Key changes: Oscar Phase 4 complete. period_start revised to last day of previous month
-based on confirmed carrier behavior (Molina/Oscar = end-of-month dates; Ambetter/Cigna = real dates).
-R2 dedup key added: (carrier, policy_number, coverage_end_date). Cigna member_dob confirmed null.
-Section 9 expanded with Oscar and Cigna column names.*
+*Last updated: April 9, 2026*
+*Key changes: Cigna Phase 5 complete. United Phase 6 is next. Ambetter R2 pagination bug
+resolved (offset loop, 334 rows/page). Ambetter data lag confirmed — cancellations appear
+in export days to weeks after dropping from active count. period_start fixed to last day
+of previous month across all bots. R2 dedup key (carrier, policy_number, coverage_end_date)
+added to all _append_deactivated_xlsx() implementations. Root .gitignore added to protect
+home directory from accidental staging.*
