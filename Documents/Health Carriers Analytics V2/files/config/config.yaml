@@ -1,0 +1,135 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# config.yaml — Insurance Analytics Pipeline
+# All URLs, selectors, timeouts, and column mappings live here.
+# Credentials NEVER go here — use .env
+# ─────────────────────────────────────────────────────────────────────────────
+
+selenium:
+  page_load_timeout: 30
+  element_timeout: 15
+  download_timeout: 120
+
+carriers:
+
+  molina:
+    portal_url: "https://account.evolvenxt.com/"
+    portal_domain: "molina.evolvenxt.com"
+
+    selectors:
+      username_field:     "id:login_id"
+      password_field:     "id:password"
+      submit_button:      "id:submit"
+      password_modal_continue: "id:goToDomain"
+      molina_carrier_card: "xpath://div[@onclick[contains(.,'molina.evolvenxt.com')]]"
+      download_button:    "id:download"
+
+    paths:
+      marketplace_search: "/portal/policy_search.htm"
+
+    columns:
+      status:         "Status"
+      member_count:   "Member_Count"
+      address1:       "Address1"
+      broker_first:   "Broker_First_Name"
+      broker_last:    "Broker_Last_Name"
+      member_first:   "Member_First_Name"
+      member_last:    "Member_Last_Name"
+      end_date:       "End_Date"
+      subscriber_id:  "Subscriber_ID"
+      hix_id:         "HIX_ID"
+      dob:            "dob"
+      state:          "State"
+
+    active_statuses:
+      - "Active"
+      - "Pending Payment"
+      - "Pending Binder"
+    terminated_status: "Terminated"
+
+  ambetter:
+    portal_url: "https://broker.ambetterhealth.com/s/login/"
+ 
+    selectors:
+      # Stable CSS selectors — Salesforce Lightning numeric IDs (e.g. id="175:0")
+      # are regenerated every session and must never be used as selectors.
+      email_field:       "input[placeholder='Email'][type='text']"
+      password_field:    "input[placeholder='Password'][type='password']"
+      # XPath for login button — the span text is the only stable hook
+      login_button:      "xpath://button[.//span[normalize-space()='Log in']]"
+      active_members:    "div#activeOdometer"
+      policies_nav:      "a[href='/s/policies']"
+      cancelled_button:  "a#CancelledBtn"
+      export_button:     "button.dt-button[title='Download as CSV']"
+ 
+    columns:
+      policy_term_date:  "Policy Term Date"    # confirmed ✓
+      first_name:        "Insured First Name"   # confirmed ✓
+      last_name:         "Insured Last Name"    # confirmed ✓
+      policy_number:     "Policy Number"        # confirmed ✓
+ 
+    cancelled_status: "Cancelled"
+
+  cigna:
+    portal_url: "https://cignaforbrokers.com/public/login"
+
+    selectors:
+      username:              "[data-test-id='username']"
+      password:              "[data-test-id='password']"
+      login_button:          "button[type='submit']"
+      # 2FA code input — SELECTOR UNCONFIRMED.
+      # All probe candidates timed out on first run (may have been a cached session).
+      # Next time the 2FA screen appears: DevTools → inspect the code input field
+      # → find the stable attribute → add as first entry in _PASSCODE_CANDIDATES
+      # in cigna_bot.py and update this value.
+      # Probe order in bot: formcontrolname='passcode', data-test-id='passcode',
+      #   name='passcode', placeholder*='code'
+      passcode:              "UNCONFIRMED — see comment above"
+      passcode_submit:       "button[type='submit']"
+      # Private network popup — click to dismiss
+      private_network_continue: "text=Continue"
+      # Left nav
+      individual_family:     "[data-test-id='left-nav-menu'] >> text=Individual and Family"
+      book_of_business:      "text=Book of Business"
+      # BOB — both R1 and R2 filters are semi-manual (CLAUDE.md §8.15)
+      # R1: total count label — "Total results: 51"
+      total_results_label:   "label.pr-5"
+      # R2 export — bot clicks after human applies Terminated filter manually
+      export_filtered:       "button >> text='Export Filtered'"
+
+    columns:
+      termination_date: "Termination Date"
+      first_name:       "Primary First Name"
+      last_name:        "Primary Last Name"
+      policy_number:    "Subscriber ID (Detail Case #)"
+      state:            "State"
+      writing_agent:    "Writing Agent"
+      # member_dob: NOT in Cigna export — always null (CLAUDE.md §8.12)
+
+  united:
+    portal_url: "https://www.uhcjarvis.com/content/jarvis/en/sign_in.html#/sign_in"
+    selectors: {}
+    columns: {}
+
+  oscar:
+    portal_url: "https://accounts.hioscar.com/account/login/"
+
+    selectors:
+      email:           "input[name='email']"
+      password:        "input[name='password']"
+      submit:          "button[type='submit'].o-loginButton"
+      app_link:        "a.o-appLink[href*='business.hioscar.com']"
+      individual_book: "text=Individual book"
+      export_csv:      "button:has-text('Export CSV')"
+      modal_done:      "button:has-text('Done')"
+      modal_next:      "button:has-text('Next')"
+      modal_continue:  "button:has-text('Continue to Book of Business')"
+      modal_close:     "button[aria-label='Close']"
+
+    columns:
+      lives:          "Lives"
+      policy_status:  "Policy status"
+      member_name:    "Member name"
+      member_id:      "Member ID"
+      date_of_birth:  "Date of birth"
+      state:          "State"
+      coverage_end:   "Coverage end date"
