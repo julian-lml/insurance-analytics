@@ -1,0 +1,16 @@
+# Ignore everything
+*
+
+# Keep this file
+!.gitignore
+
+# Except the project directory
+!Documents/
+!Documents/Health Carriers Analytics V2/
+!Documents/Health Carriers Analytics V2/files/
+!Documents/Health Carriers Analytics V2/files/**
+
+# Always ignore sensitive dirs even inside project
+Documents/Health Carriers Analytics V2/files/credentials/
+Documents/Health Carriers Analytics V2/files/.env
+Documents/Health Carriers Analytics V2/files/config/agents.yaml
