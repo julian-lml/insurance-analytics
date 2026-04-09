@@ -197,7 +197,7 @@ def _get_last_run_date() -> date | None:
 def _write_state(run_date: date) -> None:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     STATE_FILE.write_text(run_date.isoformat())
-    log.info("ambetter | state updated → %s", run_date.isoformat())
+    log.info("ambetter | state updated -> %s", run_date.isoformat())
 
 
 # ── Chrome setup ──────────────────────────────────────────────────────────────
@@ -328,34 +328,32 @@ def _download_cancelled_csv(
     driver: webdriver.Chrome, dl_dir: Path, agent_name: str
 ) -> Path:
     """
-    Two-step Salesforce Visualforce export.
+    Paginated export of all cancelled policies for one agent.
 
-    Step 1: GET the export trigger URL — returns HTML containing a base64
-            data URI for the ZIP file embedded directly in the <a> tag.
-            Format: href="data:application/zip;base64,<PAYLOAD>"
+    The endpoint returns 334 rows per page via an offset parameter.
+    We loop offset=0, 334, 668, ... until a page returns fewer than
+    PAGE_SIZE rows, then concatenate all pages into a single CSV.
 
-    Step 2: Decode the base64 payload and write to disk. No second HTTP
-            request — the file is fully embedded in the modal HTML.
+    Salesforce Lightning SPA kills ChromeDriver on navigation — we bypass
+    Selenium and transfer cookies to a requests session (CLAUDE.md §8.1).
+    Each page response is an HTML modal containing a base64-encoded ZIP.
+    We decode the ZIP in memory without writing per-page files to disk.
 
-    Why requests instead of Selenium:
-        The Policies SPA page kills the ChromeDriver window handle on
-        navigation (Salesforce Lightning security frame). Confirmed across
-        3 Selenium approaches. Session cookie transfer from the live browser
-        session is the correct bypass.
-
-    Debug behavior:
-        On parse failure, saves the raw modal HTML to dl_dir so the
-        structure can be inspected without re-running the full agent flow.
+    Returns path to combined CSV written to dl_dir.
     """
     import base64
-    import re
+    import io
+    import zipfile
     import requests
     from bs4 import BeautifulSoup
 
     BASE_URL  = "https://broker.ambetterhealth.com"
-    STEP1_URL = BASE_URL + "/apex/BC_VFP02_PolicyList_CSV?filter=cancelled&offset=0"
+    PAGE_SIZE = 334  # rows per page, confirmed from live data
 
     # ── Build requests session from the live Selenium cookies ─────────────────
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
     session = requests.Session()
     session.headers.update({
         "User-Agent": driver.execute_script("return navigator.userAgent;"),
@@ -365,65 +363,87 @@ def _download_cancelled_csv(
     for ck in driver.get_cookies():
         session.cookies.set(ck["name"], ck["value"], domain=ck.get("domain"))
 
-    # ── Step 1: trigger export, receive HTML modal ─────────────────────────────
-    import urllib3
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-    log.info("ambetter | [%s] requesting cancelled export modal", agent_name)
-    r = session.get(STEP1_URL, timeout=60, verify=False)
+    # ── Pagination loop ────────────────────────────────────────────────────────
+    all_rows: list[pd.DataFrame] = []
+    offset = 0
 
-    if r.status_code != 200:
-        raise RuntimeError(
-            f"ambetter | [{agent_name}] export request failed: HTTP {r.status_code}"
+    while True:
+        url = (
+            BASE_URL + "/apex/BC_VFP02_PolicyList_CSV"
+            f"?filter=cancelled&offset={offset}"
         )
+        r = session.get(url, timeout=60, verify=False)
 
-    ct = r.headers.get("Content-Type", "").lower()
+        if r.status_code != 200:
+            raise RuntimeError(
+                f"ambetter | [{agent_name}] export request failed: "
+                f"HTTP {r.status_code} (offset={offset})"
+            )
 
-    # Fallback: some portal configs might return the file directly (not a modal).
-    # Content-Type will be zip/csv/octet-stream in that case.
-    if any(t in ct for t in ("zip", "csv", "octet-stream")):
-        log.info("ambetter | [%s] file returned directly (no modal)", agent_name)
-        return _save_response_file(r, dl_dir, agent_name)
+        ct = r.headers.get("Content-Type", "").lower()
 
-    # ── Step 2: extract base64 data URI from modal HTML ────────────────────────
-    debug_path = dl_dir / f"_debug_modal_{agent_name.lower().replace(' ', '_')}.html"
-    debug_path.write_bytes(r.content)
+        # Direct file fallback (portal returns file instead of modal)
+        if any(t in ct for t in ("zip", "csv", "octet-stream")):
+            log.info(
+                "ambetter | [%s] file returned directly (no modal) at offset=%d",
+                agent_name, offset,
+            )
+            tmp_path = _save_response_file(r, dl_dir, agent_name)
+            all_rows.append(pd.read_csv(tmp_path, dtype=str))
+            break
 
-    b64_payload = _extract_data_uri_payload(r.text)
+        # Extract base64 ZIP from HTML modal
+        file_bytes = None
+        soup = BeautifulSoup(r.text, "html.parser")
+        for a in soup.find_all("a", href=True):
+            if a["href"].startswith("data:") and ";base64," in a["href"]:
+                _, encoded = a["href"].split(";base64,", 1)
+                file_bytes = base64.b64decode(encoded.strip())
+                break
 
-    if not b64_payload:
-        # Dump diagnostics so the structure can be found without re-running.
-        soup  = BeautifulSoup(r.text, "html.parser")
-        hrefs = [a.get("href", "")[:80] for a in soup.find_all("a", href=True)]
-        raise RuntimeError(
-            f"ambetter | [{agent_name}] no base64 data URI found in modal.\n"
-            f"  Debug HTML saved: {debug_path}\n"
-            f"  All <a> hrefs (truncated): {hrefs}\n"
-            f"  → Inspect the HTML and update _extract_data_uri_payload()."
-        )
+        if not file_bytes:
+            if offset == 0:
+                debug_path = dl_dir / f"_debug_modal_{agent_name.lower().replace(' ', '_')}.html"
+                debug_path.write_bytes(r.content)
+                hrefs = [a.get("href", "")[:80] for a in soup.find_all("a", href=True)]
+                raise RuntimeError(
+                    f"ambetter | [{agent_name}] no base64 data URI in modal.\n"
+                    f"  Debug HTML saved: {debug_path}\n"
+                    f"  All <a> hrefs (truncated): {hrefs}"
+                )
+            break  # no more pages
 
-    # ── Decode and write ───────────────────────────────────────────────────────
-    try:
-        file_bytes = base64.b64decode(b64_payload)
-    except Exception as exc:
-        raise RuntimeError(
-            f"ambetter | [{agent_name}] base64 decode failed: {exc}\n"
-            f"  Payload length: {len(b64_payload)} chars\n"
-            f"  First 80 chars: {b64_payload[:80]}"
-        ) from exc
+        # Read CSV directly from ZIP bytes — no per-page disk write
+        with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
+            csv_name = z.namelist()[0]
+            try:
+                page_df = pd.read_csv(z.open(csv_name), dtype=str)
+            except pd.errors.EmptyDataError:
+                break  # portal returns empty CSV on the terminating page
 
+        if page_df.empty:
+            break
+
+        log.info("ambetter | [%s] page offset=%d rows=%d", agent_name, offset, len(page_df))
+        all_rows.append(page_df)
+
+        if len(page_df) < PAGE_SIZE:
+            break  # last page
+
+        offset += PAGE_SIZE
+
+    if not all_rows:
+        raise RuntimeError(f"ambetter | [{agent_name}] no cancelled records retrieved")
+
+    full_df = pd.concat(all_rows, ignore_index=True)
+    log.info("ambetter | [%s] total cancelled rows across all pages=%d", agent_name, len(full_df))
+
+    # Write combined CSV to disk for audit trail and downstream processing
     safe_name = agent_name.lower().replace(" ", "_")
-    out_path  = dl_dir / f"cancelled_{safe_name}.zip"
-    out_path.write_bytes(file_bytes)
-    log.info(
-        "ambetter | [%s] ZIP decoded from modal — %d bytes → %s",
-        agent_name, len(file_bytes), out_path.name,
-    )
+    combined_path = dl_dir / f"cancelled_{safe_name}_all.csv"
+    full_df.to_csv(combined_path, index=False)
 
-    # Clean up debug file on success
-    if debug_path.exists():
-        debug_path.unlink()
-
-    return _extract_zip(out_path, dl_dir)
+    return combined_path
 
 
 def _extract_data_uri_payload(html: str) -> str | None:
@@ -523,7 +543,7 @@ def _build_r2_records(
     period_df = df[df["_term_date"] >= period_start].copy()
     log.info(
         "ambetter | [%s] R2: %d records (Policy Term Date >= %s)",
-    agent_name, len(period_df), period_start,
+        agent_name, len(period_df), period_start,
     )
 
     records: list[dict] = []
@@ -739,7 +759,7 @@ def _write_summary_xlsx(r1_records: list[dict], run_date) -> None:
         ws.column_dimensions["B"].width = 18
 
     log.info(
-        "ambetter | summary saved → %s (%d agents, %d total active)",
+        "ambetter | summary saved -> %s (%d agents, %d total active)",
         output_path, len(df), df["Active Members"].sum(),
     )
 
@@ -755,12 +775,12 @@ if __name__ == "__main__":
     _setup_logging()
     result = run_ambetter(dry_run=args.dry_run, agent_index=args.agent)
 
-    print("\n── R1  Active Members ──────────────────────────────────────────────")
+    print("\n-- R1  Active Members --------------------------------------------------")
     for r in result["r1"]:
-        mark = "✓" if r["status"] == "success" else "✗"
+        mark = "OK" if r["status"] == "success" else "!!"
         print(f"  {mark} {r['agent_name']:<25}  {r['active_members']}")
 
     r2 = result["r2"]
-    print(f"\n── R2  Deactivated This Period  ({len(r2)} records) ──────────────────")
+    print(f"\n-- R2  Deactivated This Period  ({len(r2)} records) --------------------")
     for r in r2:
         print(f"  {r['agent_name']:<25}  {r['member_name']:<30}  {r['coverage_end_date']}")

@@ -89,7 +89,7 @@ SEL_PRIVATE_NET_CONT    = "text=Continue"
 SEL_INDIVIDUAL_FAMILY   = "[data-test-id='left-nav-menu'] >> text=Individual and Family"
 SEL_BOOK_OF_BUSINESS    = "text=Book of Business"
 SEL_TOTAL_RESULTS       = "label.pr-5"
-SEL_EXPORT_FILTERED     = "button >> text='Export Filtered'"
+SEL_EXPORT              = "button >> text='Export Filtered'"
 
 # ─── Date scoping — CLAUDE.md §6 ─────────────────────────────────────────────
 
@@ -238,24 +238,28 @@ def _append_deactivated_xlsx(r2_records: list[dict]) -> None:
     cols = [
         "run_date", "carrier", "agent_name", "member_name",
         "member_dob", "state", "coverage_end_date", "policy_number",
+        "last_status", "detection_method",
     ]
     new_df = new_df[[c for c in cols if c in new_df.columns]]
 
     if output_path.exists():
         existing_df = pd.read_excel(output_path, engine="openpyxl")
         combined_df = pd.concat([existing_df, new_df], ignore_index=True)
+        rows_before = len(existing_df)
     else:
         combined_df = new_df
+        rows_before = 0
 
     combined_df = combined_df.drop_duplicates(
         subset=["carrier", "policy_number", "coverage_end_date"],
         keep="first",
     )
+    net_new = len(combined_df) - rows_before
 
     try:
         with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
             combined_df.to_excel(writer, index=False, sheet_name="Deactivated Members")
-        log.info(f"[Cigna] deactivated_members.xlsx updated — {len(combined_df)} total rows")
+        log.info("[Cigna] appended %d net-new R2 records to deactivated_members.xlsx", net_new)
     except Exception as exc:
         log.warning(f"[Cigna] XLSX write failed — {exc}. Continuing.")
 
@@ -270,7 +274,10 @@ def _write_cigna_xlsx(r1_records: list[dict]) -> None:
     output_path = ROOT / "data" / "output" / "cigna_all_agents.xlsx"
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    cols = ["agent_name", "active_members", "run_date", "run_type", "status"]
+    cols = [
+        "run_date", "run_type", "carrier", "agent_name", "active_members",
+        "status", "error_message", "duration_seconds",
+    ]
     df = pd.DataFrame(r1_records)
     df = df[[c for c in cols if c in df.columns]]
     df = df.sort_values("active_members", ascending=False)
@@ -278,7 +285,7 @@ def _write_cigna_xlsx(r1_records: list[dict]) -> None:
     try:
         with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
             df.to_excel(writer, index=False, sheet_name="Active Members")
-        log.info(f"[Cigna] XLSX written → {output_path} ({len(df)} agents)")
+        log.info("[Cigna] wrote cigna_all_agents.xlsx — %d agents", len(df))
     except Exception as exc:
         log.warning(f"[Cigna] cigna_all_agents.xlsx write failed — {exc}. Continuing.")
 
@@ -447,36 +454,21 @@ async def _run_single_agent(
             )
             return r1, []
 
-        # r2_count > 0 or unknown — check button state before attempting download.
-        # Portal disables Export Filtered when results = 0, causing download timeout.
         try:
-            export_btn = page.locator(SEL_EXPORT_FILTERED)
-            await export_btn.wait_for(state="visible", timeout=5000)
-            is_disabled = await export_btn.is_disabled()
-            if is_disabled:
-                log.info(f"[Cigna] {agent_name}: Export button disabled — 0 results, skipping export")
-                await browser.close()
-                log.info(
-                    f"[Cigna] {agent_name}: R1 active={r1['active_members']} "
-                    f"R2 records=0 period_start={period_start}"
-                )
-                return r1, []
+            async with page.expect_download(timeout=8000) as dl_info:
+                await page.locator(SEL_EXPORT).click()
+                # Dismiss error modal if it appears
+                try:
+                    await page.locator("button:has-text('OK')").click(timeout=3000)
+                except:
+                    pass
+            download = await dl_info.value
+            export_path = dl_dir / download.suggested_filename
+            await download.save_as(export_path)
+            log.info(f"[Cigna] {agent_name}: downloaded {download.suggested_filename} → {export_path}")
         except Exception:
-            log.info(f"[Cigna] {agent_name}: Export button not found — 0 results, skipping export")
-            await browser.close()
-            log.info(
-                f"[Cigna] {agent_name}: R1 active={r1['active_members']} "
-                f"R2 records=0 period_start={period_start}"
-            )
+            log.info("[Cigna] %s: export timed out or portal error — R2 = 0", agent_name)
             return r1, []
-
-        # Button is visible and enabled — proceed with download
-        async with page.expect_download() as dl_info:
-            await export_btn.click()
-        download = await dl_info.value
-        export_path = dl_dir / download.suggested_filename
-        await download.save_as(export_path)
-        log.info(f"[Cigna] {agent_name}: downloaded {download.suggested_filename} → {export_path}")
 
         await browser.close()
 
@@ -523,20 +515,18 @@ async def _run_all_agents_async(
     all_r2: list[dict] = []
 
     for agent in agents:
-        r1_record: dict | None = None
         try:
-            r1_record, r2 = await _run_single_agent(
+            r1_record, r2_records = await _run_single_agent(
                 agent, dry_run, run_date, run_type, headless
             )
-            all_r1.append(r1_record)
-            all_r2.extend(r2)
         except Exception as exc:
             log.error(f"[Cigna] {agent['name']}: unhandled error — {exc}", exc_info=True)
-            # Preserve R1 if it was captured before the crash; fall back to failed record
-            if r1_record is not None:
-                all_r1.append(r1_record)
-            else:
-                all_r1.append(_failed_r1(agent["name"], run_date, run_type, str(exc)))
+            r1_record = _failed_r1(agent["name"], run_date, run_type, str(exc))
+            r2_records = []
+
+        if r1_record:
+            all_r1.append(r1_record)
+        all_r2.extend(r2_records)
 
     success_count = sum(1 for r in all_r1 if r["status"] == "success")
 
