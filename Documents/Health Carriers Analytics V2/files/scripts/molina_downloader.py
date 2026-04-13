@@ -117,34 +117,65 @@ def _append_deactivated_xlsx(r2_records: list[dict]) -> None:
     """
     Appends R2 records to the shared deactivated members log.
     Creates the file if it doesn't exist. Never overwrites existing rows.
+    Dedup key: (carrier, policy_number, coverage_end_date), keep='first'.
+    Logs found / already_in_file / net_new_appended counts.
     """
     if not r2_records:
+        return
+
+    found_count = len(r2_records)
+
+    # Null policy_number guard — skip and warn before any append
+    clean_records: list[dict] = []
+    for rec in r2_records:
+        pn = rec.get("policy_number")
+        if not pn or (isinstance(pn, str) and not pn.strip()):
+            log.warning(
+                "Molina | R2 | skipping — policy_number is null | member=%s | agent=%s",
+                rec.get("member_name", "UNKNOWN"), rec.get("agent_name", "UNKNOWN"),
+            )
+        else:
+            clean_records.append(rec)
+
+    valid_count = len(clean_records)
+
+    if not clean_records:
+        log.info(
+            "Molina | R2 | found=%d | already_in_file=%d | net_new_appended=%d",
+            found_count, 0, 0,
+        )
         return
 
     output_path = ROOT / "data" / "output" / "deactivated_members.xlsx"
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    new_df = pd.DataFrame(r2_records)
+    new_df = pd.DataFrame(clean_records)
 
     # Columns to keep, in order
     cols = [
         "run_date", "carrier", "agent_name", "member_name",
         "member_dob", "state", "coverage_end_date", "policy_number",
+        "last_status", "detection_method",
     ]
-    # Only keep columns that exist (graceful if member_dob/state missing)
+    # Only keep columns that exist (graceful if optional fields missing)
     cols = [c for c in cols if c in new_df.columns]
     new_df = new_df[cols]
 
     if output_path.exists():
         existing_df = pd.read_excel(output_path, engine="openpyxl")
+        rows_before = len(existing_df)
         combined_df = pd.concat([existing_df, new_df], ignore_index=True)
     else:
+        rows_before = 0
         combined_df = new_df
 
     combined_df = combined_df.drop_duplicates(
         subset=["carrier", "policy_number", "coverage_end_date"],
         keep="first",
     )
+
+    net_new = len(combined_df) - rows_before
+    already_in_file = valid_count - net_new
 
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         combined_df.to_excel(writer, index=False, sheet_name="Deactivated Members")
@@ -157,6 +188,11 @@ def _append_deactivated_xlsx(r2_records: list[dict]) -> None:
         ws.column_dimensions["F"].width = 8   # state
         ws.column_dimensions["G"].width = 20  # coverage_end_date
         ws.column_dimensions["H"].width = 16  # policy_number
+
+    log.info(
+        "Molina | R2 | found=%d | already_in_file=%d | net_new_appended=%d",
+        found_count, already_in_file, net_new,
+    )
 
 def setup_logging(carrier: str = "MOLINA") -> tuple[logging.Logger, Path]:
     """
@@ -633,6 +669,12 @@ def _run_single_agent(
         log.error(f"[{agent_name}] CSV processing failed: {exc}")
         return _agent_result(agent_name, "failed", f"CSV processing: {exc}", start)
 
+    # Patch R2 schema fields — hardcoded constants for Molina (CLAUDE.md §fix 2)
+    # molina_report.py is not modified directly per CLAUDE.md constraint.
+    for rec in r2_records:
+        rec.setdefault("last_status", "Terminated")
+        rec.setdefault("detection_method", "file_extract")
+
     duration = round(time.time() - start, 2)
     active_count = sum(r["active_members"] for r in r1_records)
     log.info(
@@ -860,12 +902,22 @@ def _write_combined_xlsx(r1_records: list[dict]) -> None:
     if not success_records:
         return
 
-    df = pd.DataFrame(success_records)[["agent_name", "active_members"]]
-    df.columns = ["Agent", "Active Members"]
-    df = df.sort_values("Active Members", ascending=False)
+    new_df = pd.DataFrame(success_records)[["agent_name", "active_members"]]
+    new_df.columns = ["Agent", "Active Members"]
 
     output_path = ROOT / "data" / "output" / "molina_all_agents.xlsx"
     output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if output_path.exists():
+        existing_df = pd.read_excel(output_path, engine="openpyxl")
+        agent_names = new_df["Agent"].unique().tolist()
+        existing_df = existing_df[~existing_df["Agent"].isin(agent_names)]
+        df = pd.concat([existing_df, new_df], ignore_index=True)
+    else:
+        df = new_df
+
+    df = df.sort_values("Active Members", ascending=False)
+
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name="Active Members")
 

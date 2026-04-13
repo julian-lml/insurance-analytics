@@ -313,8 +313,17 @@ def _write_united_xlsx(r1_records: list[dict]) -> None:
         "run_date", "run_type", "carrier", "agent_name", "active_members",
         "status", "error_message", "duration_seconds",
     ]
-    df = pd.DataFrame(r1_records)
-    df = df[[c for c in cols if c in df.columns]]
+    new_df = pd.DataFrame(r1_records)
+    new_df = new_df[[c for c in cols if c in new_df.columns]]
+
+    if output_path.exists():
+        existing_df = pd.read_excel(output_path, engine="openpyxl")
+        agent_names = new_df["agent_name"].unique().tolist()
+        existing_df = existing_df[~existing_df["agent_name"].isin(agent_names)]
+        df = pd.concat([existing_df, new_df], ignore_index=True)
+    else:
+        df = new_df
+
     df = df.sort_values("active_members", ascending=False)
 
     try:

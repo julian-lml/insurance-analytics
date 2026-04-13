@@ -227,14 +227,38 @@ def _append_deactivated_xlsx(r2_records: list[dict]) -> None:
     Append R2 records to shared deactivated_members.xlsx.
     Dedup key: (carrier, policy_number, coverage_end_date).
     Existing rows always win (keep="first"). CLAUDE.md §6.
+    Logs found / already_in_file / net_new_appended counts.
     """
     if not r2_records:
+        return
+
+    found_count = len(r2_records)
+
+    # Null policy_number guard — skip and warn before any append
+    clean_records: list[dict] = []
+    for rec in r2_records:
+        pn = rec.get("policy_number")
+        if not pn or (isinstance(pn, str) and not pn.strip()):
+            log.warning(
+                "Cigna | R2 | skipping — policy_number is null | member=%s | agent=%s",
+                rec.get("member_name", "UNKNOWN"), rec.get("agent_name", "UNKNOWN"),
+            )
+        else:
+            clean_records.append(rec)
+
+    valid_count = len(clean_records)
+
+    if not clean_records:
+        log.info(
+            "Cigna | R2 | found=%d | already_in_file=%d | net_new_appended=%d",
+            found_count, 0, 0,
+        )
         return
 
     output_path = ROOT / "data" / "output" / "deactivated_members.xlsx"
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    new_df = pd.DataFrame(r2_records)
+    new_df = pd.DataFrame(clean_records)
     cols = [
         "run_date", "carrier", "agent_name", "member_name",
         "member_dob", "state", "coverage_end_date", "policy_number",
@@ -244,24 +268,31 @@ def _append_deactivated_xlsx(r2_records: list[dict]) -> None:
 
     if output_path.exists():
         existing_df = pd.read_excel(output_path, engine="openpyxl")
-        combined_df = pd.concat([existing_df, new_df], ignore_index=True)
         rows_before = len(existing_df)
+        combined_df = pd.concat([existing_df, new_df], ignore_index=True)
     else:
-        combined_df = new_df
         rows_before = 0
+        combined_df = new_df
 
     combined_df = combined_df.drop_duplicates(
         subset=["carrier", "policy_number", "coverage_end_date"],
         keep="first",
     )
+
     net_new = len(combined_df) - rows_before
+    already_in_file = valid_count - net_new
 
     try:
         with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
             combined_df.to_excel(writer, index=False, sheet_name="Deactivated Members")
-        log.info("[Cigna] appended %d net-new R2 records to deactivated_members.xlsx", net_new)
     except Exception as exc:
-        log.warning(f"[Cigna] XLSX write failed — {exc}. Continuing.")
+        log.warning("Cigna | XLSX write failed — %s. Continuing.", exc)
+        return
+
+    log.info(
+        "Cigna | R2 | found=%d | already_in_file=%d | net_new_appended=%d",
+        found_count, already_in_file, net_new,
+    )
 
 
 # ─── R1 XLSX writer ───────────────────────────────────────────────────────────
@@ -278,8 +309,17 @@ def _write_cigna_xlsx(r1_records: list[dict]) -> None:
         "run_date", "run_type", "carrier", "agent_name", "active_members",
         "status", "error_message", "duration_seconds",
     ]
-    df = pd.DataFrame(r1_records)
-    df = df[[c for c in cols if c in df.columns]]
+    new_df = pd.DataFrame(r1_records)
+    new_df = new_df[[c for c in cols if c in new_df.columns]]
+
+    if output_path.exists():
+        existing_df = pd.read_excel(output_path, engine="openpyxl")
+        agent_names = new_df["agent_name"].unique().tolist()
+        existing_df = existing_df[~existing_df["agent_name"].isin(agent_names)]
+        df = pd.concat([existing_df, new_df], ignore_index=True)
+    else:
+        df = new_df
+
     df = df.sort_values("active_members", ascending=False)
 
     try:

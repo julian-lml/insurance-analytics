@@ -101,34 +101,65 @@ def _append_deactivated_xlsx(r2_records: list[dict]) -> None:
     """
     Appends R2 records to the shared deactivated members log.
     Creates the file if it doesn't exist. Never overwrites existing rows.
+    Dedup key: (carrier, policy_number, coverage_end_date), keep='first'.
+    Logs found / already_in_file / net_new_appended counts.
     """
     if not r2_records:
+        return
+
+    found_count = len(r2_records)
+
+    # Null policy_number guard — skip and warn before any append
+    clean_records: list[dict] = []
+    for rec in r2_records:
+        pn = rec.get("policy_number")
+        if not pn or (isinstance(pn, str) and not pn.strip()):
+            log.warning(
+                "Ambetter | R2 | skipping — policy_number is null | member=%s | agent=%s",
+                rec.get("member_name", "UNKNOWN"), rec.get("agent_name", "UNKNOWN"),
+            )
+        else:
+            clean_records.append(rec)
+
+    valid_count = len(clean_records)
+
+    if not clean_records:
+        log.info(
+            "Ambetter | R2 | found=%d | already_in_file=%d | net_new_appended=%d",
+            found_count, 0, 0,
+        )
         return
 
     output_path = ROOT / "data" / "output" / "deactivated_members.xlsx"
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    new_df = pd.DataFrame(r2_records)
+    new_df = pd.DataFrame(clean_records)
 
     # Columns to keep, in order
     cols = [
         "run_date", "carrier", "agent_name", "member_name",
         "member_dob", "state", "coverage_end_date", "policy_number",
+        "last_status", "detection_method",
     ]
-    # Only keep columns that exist (graceful if member_dob/state missing)
+    # Only keep columns that exist (graceful if optional fields missing)
     cols = [c for c in cols if c in new_df.columns]
     new_df = new_df[cols]
 
     if output_path.exists():
         existing_df = pd.read_excel(output_path, engine="openpyxl")
+        rows_before = len(existing_df)
         combined_df = pd.concat([existing_df, new_df], ignore_index=True)
     else:
+        rows_before = 0
         combined_df = new_df
 
     combined_df = combined_df.drop_duplicates(
         subset=["carrier", "policy_number", "coverage_end_date"],
         keep="first",
     )
+
+    net_new = len(combined_df) - rows_before
+    already_in_file = valid_count - net_new
 
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         combined_df.to_excel(writer, index=False, sheet_name="Deactivated Members")
@@ -141,6 +172,11 @@ def _append_deactivated_xlsx(r2_records: list[dict]) -> None:
         ws.column_dimensions["F"].width = 8   # state
         ws.column_dimensions["G"].width = 20  # coverage_end_date
         ws.column_dimensions["H"].width = 16  # policy_number
+
+    log.info(
+        "Ambetter | R2 | found=%d | already_in_file=%d | net_new_appended=%d",
+        found_count, already_in_file, net_new,
+    )
 
 def _resolve_selector(selector_str: str) -> tuple:
     """
@@ -219,6 +255,9 @@ def _build_driver(download_dir: Path) -> webdriver.Chrome:
     opts = Options()
     opts.add_argument("--start-maximized")
     opts.add_argument("--disable-notifications")
+    opts.add_argument("--no-sandbox")
+    opts.add_argument("--disable-dev-shm-usage")
+    opts.add_argument("--disable-gpu")
     opts.add_experimental_option("prefs", {
         "download.default_directory":   str(download_dir),
         "download.prompt_for_download": False,
@@ -296,6 +335,14 @@ def _login(driver: webdriver.Chrome, agent: dict) -> None:
 
     _clickable(driver, SEL_LOGIN_BTN).click()
     log.info("ambetter | [%s] credentials submitted", agent["name"])
+
+    # Lightning SPA may open a new window handle on login — switch to it immediately
+    # so subsequent Selenium calls don't target a dead handle.
+    time.sleep(1)
+    handles = driver.window_handles
+    if len(handles) > 1:
+        driver.switch_to.window(handles[-1])
+        log.info("ambetter | [%s] switched to new window handle (%d open)", agent["name"], len(handles))
 
     # Dashboard load confirmed when the odometer element is present
     try:
@@ -560,12 +607,49 @@ def _build_r2_records(
             "member_name":       f"{first} {last}".strip(),
             "policy_number":     policy_num,
             "last_status":       "Cancelled",
+            "detection_method":  "download_filter",
             "coverage_end_date": term_date.isoformat() if term_date else None,
             "member_dob":        str(row.get("Member Date Of Birth", "")).strip() or None,
             "state":             str(row.get("State", "")).strip() or None,
         })
 
     return records
+
+
+# ── Selector diagnostics ──────────────────────────────────────────────────────
+def _debug_selectors(agent: dict) -> None:
+    """
+    Load the Ambetter login page and save the full page source to
+    logs/ambetter_login_page_source.html so selectors can be verified
+    against the live DOM without running the full login flow.
+
+    Usage:
+        python scripts/ambetter_bot.py --debug-selectors
+    """
+    import tempfile
+
+    tmp_dir = Path(tempfile.mkdtemp())
+    driver  = _build_driver(tmp_dir)
+    try:
+        log.info("ambetter | debug-selectors: loading %s", PORTAL_URL)
+        driver.get(PORTAL_URL)
+        time.sleep(3)   # allow Lightning to render initial components
+
+        src_path = ROOT / "logs" / "ambetter_login_page_source.html"
+        src_path.parent.mkdir(exist_ok=True)
+        src_path.write_text(driver.page_source, encoding="utf-8")
+
+        print(f"\nPage source saved → {src_path}")
+        print("\nCurrent selectors in config.yaml:")
+        print(f"  email_field:    {SEL_EMAIL}")
+        print(f"  password_field: {SEL_PASSWORD}")
+        print(f"  login_button:   {SEL_LOGIN_BTN}")
+        print(f"  active_members: {SEL_ACTIVE_DIV}")
+        print("\nOpen the saved HTML in a browser (File → Open) or search it for")
+        print("the actual <input> attributes (placeholder, type, name, id).")
+        print("Update carriers.ambetter.selectors in config/config.yaml if they differ.")
+    finally:
+        driver.quit()
 
 
 # ── Single-agent runner ───────────────────────────────────────────────────────
@@ -742,7 +826,7 @@ def _write_summary_xlsx(r1_records: list[dict], run_date) -> None:
         log.warning("ambetter | no successful R1 records — skipping XLSX write")
         return
 
-    df = (
+    new_df = (
         pd.DataFrame(rows)
         .sort_values("Active Members", ascending=False)
         .reset_index(drop=True)
@@ -751,6 +835,16 @@ def _write_summary_xlsx(r1_records: list[dict], run_date) -> None:
     output_dir = ROOT / "data" / "output"
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / "ambetter_all_agents.xlsx"
+
+    if output_path.exists():
+        existing_df = pd.read_excel(output_path, engine="openpyxl")
+        agent_names = new_df["Agent"].unique().tolist()
+        existing_df = existing_df[~existing_df["Agent"].isin(agent_names)]
+        df = pd.concat([existing_df, new_df], ignore_index=True)
+    else:
+        df = new_df
+
+    df = df.sort_values("Active Members", ascending=False).reset_index(drop=True)
 
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name="Ambetter Active Members")
@@ -770,9 +864,17 @@ if __name__ == "__main__":
                         help="Run a single agent by 0-based index (e.g. --agent 0)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Skip state file update")
+    parser.add_argument("--debug-selectors", action="store_true",
+                        help="Load login page, save page source for selector diagnosis, then exit")
     args = parser.parse_args()
 
     _setup_logging()
+
+    if args.debug_selectors:
+        agents = _load_agents()
+        _debug_selectors(agents[0])   # any agent creds work — just needs the login page
+        sys.exit(0)
+
     result = run_ambetter(dry_run=args.dry_run, agent_index=args.agent)
 
     print("\n-- R1  Active Members --------------------------------------------------")
