@@ -343,8 +343,7 @@ async def _run_single_agent(
         # Sequence (CLAUDE.md §8.18):
         #   1. Load sign-in page
         #   2. Click SSO button → redirects to One Healthcare ID (Optum domain)
-        #   3. Wait for Optum redirect to confirm navigation completed
-        #      NOTE: adjust "**optum**" pattern after confirming the redirect URL on first run
+        #   3. Wait for One Healthcare ID redirect (identity.onehealthcareid.com)
         #   4. Fill username + click Login
         #   5. Fill password + click Login
         backoffs = [5, 15, 45]
@@ -354,7 +353,7 @@ async def _run_single_agent(
             try:
                 await page.goto(SIGN_IN_URL)
                 await page.click(SEL_SSO_BTN)
-                await page.wait_for_url("**optum**", timeout=15_000)
+                await page.wait_for_url("**onehealthcareid.com**", timeout=15_000)
                 await page.fill(SEL_USERNAME, agent["user"])
                 await page.click(SEL_LOGIN_BTN)
                 await page.fill(SEL_PASSWORD, agent["pass"])
