@@ -66,15 +66,17 @@ def _setup_logging() -> None:
 
 log = logging.getLogger(__name__)
 
-# ─── Column constants — must match config/config.yaml carriers.united.columns ──
-# Confirmed from live export: BookOfBusinessExport-03242026.xlsx (CLAUDE.md §8.17)
+# ─── Column constants — confirmed from live Jarvis BookOfBusiness DownloadResults.xlsx ──
+# NOTE: these are camelCase, different from the original sample file (CLAUDE.md §8.17).
+# No subscriber/policy ID column confirmed in this download — policy_number is a
+# temporary name-based composite key until confirmed (see _build_r2_records).
 
-COL_TERM_DATE   = "Termination Date"               # M/D/YYYY string — parse with format="%m/%d/%Y"
-COL_FIRST_NAME  = "Primary First Name"
-COL_LAST_NAME   = "Primary Last Name"
-COL_POLICY_NUM  = "Subscriber ID (Detail Case #)"  # same column name as Cigna
-COL_STATE       = "State"
-COL_POLICY_STATUS = "Policy Status"                # "Terminated" for R2 records
+COL_TERM_DATE     = "policyTermDate"   # M/D/YYYY or YYYY-MM-DD — parse with errors="coerce"
+COL_FIRST_NAME    = "memberFirstName"
+COL_LAST_NAME     = "memberLastName"
+COL_STATE         = "memberState"
+COL_DOB           = "dateOfBirth"      # IS available in this export (not null)
+COL_POLICY_STATUS = "planStatus"       # "Active" confirmed; terminated value TBD after first run
 
 # ─── Selectors — verify against live portal before first run ──────────────────
 # TODO: Inspect uhcjarvis.com login page and update these selectors as needed.
@@ -179,49 +181,56 @@ def _build_r2_records(
 ) -> list[dict]:
     """
     R2 schema — CLAUDE.md §5.
-    Filter: Policy Status == "Terminated" AND Termination Date >= period_start.
+    Filter: planStatus != "Active" AND policyTermDate >= period_start.
 
-    Termination Date is M/D/YYYY string — parse with format="%m/%d/%Y".
-    member_dob is always None — not available in United export (CLAUDE.md §8.17).
-    detection_method = "file_extract" (CLAUDE.md §8.17).
+    policyTermDate may be M/D/YYYY or YYYY-MM-DD — parsed with errors="coerce".
+    member_dob available via dateOfBirth column (confirmed in live export).
+    detection_method = "file_extract".
+
+    policy_number: no subscriber ID column confirmed in this download.
+    Temporary composite key: memberFirstName_memberLastName.
+    WARNING is logged. Replace once policy ID column is confirmed.
     """
     period_start = calculate_period_start()
 
     df = df.copy()
 
-    # Filter to Terminated rows only (export may contain all statuses)
+    # Filter out Active rows — keep everything else (terminated value TBD)
     if COL_POLICY_STATUS in df.columns:
-        df = df[df[COL_POLICY_STATUS].str.strip().str.lower() == "terminated"]
+        df = df[df[COL_POLICY_STATUS].str.strip() != "Active"]
 
-    # Parse Termination Date — M/D/YYYY string (e.g., "1/7/2026", "2/26/2026")
-    df[COL_TERM_DATE] = pd.to_datetime(
-        df[COL_TERM_DATE], format="%m/%d/%Y", errors="coerce"
-    )
+    # Parse policyTermDate — M/D/YYYY or YYYY-MM-DD, errors coerced to NaT
+    df[COL_TERM_DATE] = pd.to_datetime(df[COL_TERM_DATE], errors="coerce")
     df = df.dropna(subset=[COL_TERM_DATE])
     df = df[df[COL_TERM_DATE].dt.date >= period_start]
 
     log.info(
-        "[United] %s: R2 date filter -> %d Terminated rows with Termination Date >= %s",
+        "[United] %s: R2 date filter -> %d non-Active rows with policyTermDate >= %s",
         agent_name, len(df), period_start,
+    )
+
+    log.warning(
+        "[United] %s: No subscriber ID column confirmed in download — "
+        "using name-based composite key for dedup (temporary). "
+        "Confirm policy ID column name after first successful run.",
+        agent_name,
     )
 
     records = []
     for _, row in df.iterrows():
-        member_name = " ".join(
-            filter(None, [
-                str(row.get(COL_FIRST_NAME, "") or "").strip(),
-                str(row.get(COL_LAST_NAME, "") or "").strip(),
-            ])
-        )
+        first = str(row.get(COL_FIRST_NAME, "") or "").strip()
+        last  = str(row.get(COL_LAST_NAME,  "") or "").strip()
+        member_name = f"{first} {last}".strip()
+        dob_val = row.get(COL_DOB)
         records.append({
             "run_date":          run_date,
             "carrier":           "United",
             "agent_name":        agent_name,
             "member_name":       member_name,
-            "member_dob":        None,          # not in United export — permanent (CLAUDE.md §8.17)
+            "member_dob":        str(dob_val) if pd.notna(dob_val) else None,
             "state":             str(row.get(COL_STATE, "") or "").strip(),
             "coverage_end_date": row[COL_TERM_DATE].strftime("%Y-%m-%d"),
-            "policy_number":     str(row.get(COL_POLICY_NUM, "") or "").strip(),
+            "policy_number":     f"{first}_{last}",   # temporary — no ID col confirmed
             "last_status":       "Terminated",
             "detection_method":  "file_extract",
         })
@@ -238,16 +247,16 @@ def _parse_export_file(file_path: Path) -> pd.DataFrame:
 def _read_export(path: Path) -> pd.DataFrame:
     """
     Read UHC export XLSX, finding the real header row by scanning for
-    'Subscriber ID (Detail Case #)' which is always the first column header.
+    'memberFirstName' which is always the first column header.
     Tries rows 0-9. Raises ValueError if not found.
     """
     for header_row in range(10):
         df = pd.read_excel(path, header=header_row, engine="openpyxl", dtype=str)
-        if "Subscriber ID (Detail Case #)" in df.columns:
+        if "memberFirstName" in df.columns:
             return df
     raise ValueError(
         f"Could not find expected headers in {path.name}. "
-        "Ensure 'Subscriber ID (Detail Case #)' column is selected in the download modal."
+        "Ensure 'memberFirstName' column is present in the download."
     )
 
 
@@ -466,14 +475,14 @@ async def _run_single_agent(
             agent_name, df[COL_POLICY_STATUS].value_counts().to_dict(),
         )
 
-    required = {COL_TERM_DATE, COL_POLICY_NUM}
+    required = {COL_TERM_DATE, COL_FIRST_NAME, COL_LAST_NAME}
     missing = required - set(df.columns)
     if missing:
         log.warning(
             "[United] %s: export missing expected columns: %s. Columns present: %s",
             agent_name, missing, list(df.columns),
         )
-        if required - set(df.columns):
+        if missing:
             raise ValueError(f"Cannot process export — missing critical columns: {missing}")
 
     r2 = _build_r2_records(df, agent_name, run_date)
