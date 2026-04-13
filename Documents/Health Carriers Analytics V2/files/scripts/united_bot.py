@@ -381,17 +381,22 @@ async def _run_single_agent(
             await page.fill(SEL_USERNAME, agent["user"])
             await page.click(SEL_LOGIN_BTN)
             await page.locator(SEL_PASSWORD).wait_for(state="visible", timeout=15_000)
-            await page.locator(SEL_PASSWORD).click()
-            await page.locator(SEL_PASSWORD).type(agent["pass"], delay=50)
-
-            # Verify the field was actually filled — fallback to manual if empty
-            filled_value = await page.locator(SEL_PASSWORD).input_value()
-            if not filled_value:
+            if agent.get("manual_password"):
                 print(
-                    f"\n[United] [{agent['name']}] Password field empty after type() — "
-                    f"fill it manually in the browser, then press ENTER..."
+                    f"\n[United] [{agent['name']}] Fill password manually in the browser, "
+                    f"then press ENTER..."
                 )
                 input()
+            else:
+                await page.locator(SEL_PASSWORD).click()
+                await page.locator(SEL_PASSWORD).type(agent["pass"], delay=50)
+                filled = await page.locator(SEL_PASSWORD).input_value()
+                if not filled:
+                    print(
+                        f"\n[United] [{agent['name']}] Password field empty — "
+                        f"fill manually, then press ENTER..."
+                    )
+                    input()
 
             await page.click(SEL_LOGIN_BTN)
             last_exc = None
