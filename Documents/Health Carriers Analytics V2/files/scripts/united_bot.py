@@ -478,21 +478,21 @@ async def _run_all_agents_async(
     all_r2: list[dict] = []
 
     for agent in agents:
-        # Fresh playwright + browser + context per agent — prevents fingerprint
-        # accumulation that causes identity.onehealthcareid.com to reject input
-        # after 5-6 sequential logins from the same browser instance.
+        # Per-agent persistent Chrome profile — accumulates real session data
+        # so the portal sees a legitimate returning browser, not a sterile context.
+        agent_profile = str(
+            ROOT / "data" / "chrome_profiles" / agent["name"].replace(" ", "_")
+        )
+
         async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=headless,
+            # launch_persistent_context returns a BrowserContext directly (no
+            # separate Browser object). Pass it to _run_single_agent as `context`.
+            context = await p.chromium.launch_persistent_context(
+                user_data_dir=agent_profile,
                 channel="chrome",
+                headless=headless,
                 args=["--disable-blink-features=AutomationControlled"],
-            )
-            context = await browser.new_context(
                 accept_downloads=True,
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-                ),
             )
             await context.add_init_script(
                 "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
@@ -506,7 +506,7 @@ async def _run_all_agents_async(
                 r1_record = _failed_r1(agent["name"], run_date, run_type, str(exc))
                 r2_records = []
             finally:
-                await browser.close()
+                await context.close()
 
         if r1_record:
             all_r1.append(r1_record)
