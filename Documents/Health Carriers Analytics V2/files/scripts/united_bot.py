@@ -351,11 +351,12 @@ async def _run_single_agent(
 
         for attempt, backoff in enumerate(backoffs, start=1):
             try:
-                await page.goto(SIGN_IN_URL)
+                await page.goto(SIGN_IN_URL, wait_until="domcontentloaded")
                 await page.click(SEL_SSO_BTN)
                 await page.wait_for_url("**onehealthcareid.com**", timeout=15_000)
                 await page.fill(SEL_USERNAME, agent["user"])
                 await page.click(SEL_LOGIN_BTN)
+                await page.locator(SEL_PASSWORD).wait_for(state="visible", timeout=15_000)
                 await page.fill(SEL_PASSWORD, agent["pass"])
                 await page.click(SEL_LOGIN_BTN)
                 last_exc = None
