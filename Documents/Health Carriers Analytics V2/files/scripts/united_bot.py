@@ -43,6 +43,7 @@ from pathlib import Path
 import pandas as pd
 import yaml
 from dotenv import load_dotenv
+from playwright.async_api import TimeoutError as PWTimeout
 
 load_dotenv()
 
@@ -78,16 +79,9 @@ COL_STATE         = "memberState"
 COL_DOB           = "dateOfBirth"      # IS available in this export (not null)
 COL_POLICY_STATUS = "planStatus"       # "Active" confirmed; terminated value TBD after first run
 
-# ─── Selectors — verify against live portal before first run ──────────────────
-# TODO: Inspect uhcjarvis.com login page and update these selectors as needed.
-
 SIGN_IN_URL      = "https://www.uhcjarvis.com/content/jarvis/en/sign_in.html#/sign_in"
-SEL_SSO_BTN      = "button:has-text('Sign in with One Healthcare ID')"
-SEL_USERNAME     = "input#username"
-SEL_PASSWORD     = "input#login-pwd"
-SEL_LOGIN_BTN    = "button#btnLogin"
 
-# R1 — active count label shown after navigating to Book of Business.
+# R1 — active count label on the Jarvis Book of Business dashboard.
 # Confirmed from live portal HTML inspection.
 SEL_ACTIVE_COUNT = "p#activemembercount"
 
@@ -363,50 +357,26 @@ async def _run_single_agent(
 
     page = await context.new_page()
 
-    # ── Login (retry on page-load failure, NOT on auth failure) ───────────
-    # Sequence (CLAUDE.md §8.18):
-    #   1. Load sign-in page
-    #   2. Click SSO button → redirects to One Healthcare ID (Optum domain)
-    #   3. Wait for One Healthcare ID redirect (identity.onehealthcareid.com)
-    #   4. Fill username + click Login
-    #   5. Fill password + click Login
-    backoffs = [5, 15, 45]
-    last_exc: Exception | None = None
-
-    for attempt, backoff in enumerate(backoffs, start=1):
-        try:
-            await page.goto(SIGN_IN_URL, wait_until="domcontentloaded")
-            await page.click(SEL_SSO_BTN)
-            await page.wait_for_url("**onehealthcareid.com**", timeout=15_000)
-            await page.fill(SEL_USERNAME, agent["user"])
-            await page.click(SEL_LOGIN_BTN)
-            await page.locator(SEL_PASSWORD).wait_for(state="visible", timeout=15_000)
-            print(
-                f"\n[United] [{agent['name']}] Type password in the browser and click "
-                f"Continue, then press ENTER here..."
-            )
-            input()
-            # User typed password and clicked Continue manually
-            last_exc = None
-            break
-        except Exception as exc:
-            last_exc = exc
-            log.warning(
-                f"[United] {agent_name}: login attempt {attempt}/3 failed — {exc}"
-            )
-            if attempt < len(backoffs):
-                await asyncio.sleep(backoff)
-
-    if last_exc:
-        raise last_exc
-
-    # ── MFA pause — human approves MS Authenticator ───────────────────────
-    print(f"\n[United] Agent: {agent_name}")
-    print("[United] Approve Microsoft Authenticator on the boss's phone, then press ENTER...")
+    # ── Login — fully manual ──────────────────────────────────────────────
+    # Portal detects Playwright at browser level for some accounts.
+    # Bot opens the sign-in page; human completes the full login flow.
+    await page.goto(SIGN_IN_URL, wait_until="domcontentloaded")
+    print(f"\n[United] [{agent['name']}]")
+    print(f"  1. Log in completely manually in the browser")
+    print(f"     Username: {agent['user']}")
+    print(f"     Password: {agent['pass']}")
+    print(f"  2. Approve Microsoft Authenticator when prompted")
+    print(f"  3. When you reach the Jarvis dashboard, press ENTER here...")
     input()
 
-    # Wait for dashboard to fully load before any further interaction
-    await page.locator(SEL_ACTIVE_COUNT).wait_for(timeout=20_000)
+    # Auth guard — confirm dashboard loaded before proceeding
+    try:
+        await page.locator(SEL_ACTIVE_COUNT).wait_for(state="visible", timeout=20_000)
+    except PWTimeout:
+        raise RuntimeError(
+            f"Dashboard not loaded after manual login for {agent_name}. "
+            "Ensure you are on the Jarvis home page before pressing ENTER."
+        )
     log.info("[United] %s: dashboard loaded", agent_name)
 
     # ── R1: read active count from dashboard ─────────────────────────────
