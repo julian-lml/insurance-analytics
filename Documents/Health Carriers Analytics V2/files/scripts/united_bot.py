@@ -485,6 +485,9 @@ async def _run_all_agents_async(
                     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
                 ),
             )
+            await context.add_init_script(
+                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+            )
             try:
                 r1_record, r2_records = await _run_single_agent(
                     agent, context, dry_run, run_date, run_type
