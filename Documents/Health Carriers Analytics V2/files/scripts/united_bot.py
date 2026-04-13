@@ -226,7 +226,7 @@ def _build_r2_records(
             "state":             str(row.get(COL_STATE, "") or "").strip(),
             "coverage_end_date": row[COL_TERM_DATE].strftime("%Y-%m-%d"),
             "policy_number":     f"{first}_{last}",   # temporary — no ID col confirmed
-            "last_status":       "Terminated",
+            "last_status":       "Inactive",   # planStatus == 'I' — confirmed April 2026
             "detection_method":  "file_extract",
         })
     return records

@@ -580,21 +580,27 @@ writing_agent:    "Writing Agent"       # Use for agent matching
 policy_status:    "Policy Status"       # "Terminated" for R2 records
 ```
 
-### United (live XLSX export — BookOfBusinessExport-03242026.xlsx)
+### United (live Jarvis BookOfBusiness DownloadResults.xlsx — confirmed April 2026)
 ```yaml
-termination_date: "Termination Date"              # Real date, M/D/YYYY string — NOT end-of-month
-                                                   # Parse: pd.to_datetime(format="%m/%d/%Y")
-first_name:       "Primary First Name"
-last_name:        "Primary Last Name"
-policy_number:    "Subscriber ID (Detail Case #)" # Same column name as Cigna
-state:            "State"
-member_dob:       null                             # NOT available in United export — permanent
-writing_agent:    "Writing Agent"                  # DO NOT USE — always source agent_name from agents.yaml
-policy_status:    "Policy Status"                  # "Terminated" for R2 records
-coverage_status:  "Coverage Status"                # mirrors Policy Status
+termination_date: "policyTermDate"                 # YYYY-MM-DD string — parse with errors="coerce"
+first_name:       "memberFirstName"
+last_name:        "memberLastName"
+state:            "memberState"
+member_dob:       "dateOfBirth"                    # IS available in this export
+writing_agent:    "agentName"                      # DO NOT USE — always source agent_name from agents.yaml
+policy_status:    "planStatus"                     # single-char code: 'A' = Active, 'I' = Inactive/Terminated
+# policy_number: no subscriber ID column confirmed — temporary composite key: memberFirstName_memberLastName
 ```
 
-United R2 filter: `Policy Status == "Terminated"` AND `Termination Date >= calculate_period_start()`
+**planStatus codes (confirmed from live data — Juan Gallegos full-book download):**
+- `'A'` = Active
+- `'I'` = Inactive / Terminated → R2 filter
+
+United R2 filter: `planStatus == 'I'` AND `policyTermDate >= calculate_period_start()`
+
+R2 `last_status` value: `"Inactive"` (matches the portal's single-char code)
+
+Identical approach to Oscar: filter to non-Active rows by status code, not string "Terminated".
 
 ---
 
