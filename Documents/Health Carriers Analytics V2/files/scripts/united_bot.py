@@ -357,7 +357,8 @@ async def _run_single_agent(
                 await page.fill(SEL_USERNAME, agent["user"])
                 await page.click(SEL_LOGIN_BTN)
                 await page.locator(SEL_PASSWORD).wait_for(state="visible", timeout=15_000)
-                await page.fill(SEL_PASSWORD, agent["pass"])
+                await page.locator(SEL_PASSWORD).click()
+                await page.locator(SEL_PASSWORD).type(agent["pass"], delay=50)
                 await page.click(SEL_LOGIN_BTN)
                 last_exc = None
                 break
