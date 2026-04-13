@@ -235,6 +235,22 @@ def _parse_export_file(file_path: Path) -> pd.DataFrame:
     return pd.read_excel(file_path, engine="openpyxl", dtype=str)
 
 
+def _read_export(path: Path) -> pd.DataFrame:
+    """
+    Read UHC export XLSX, finding the real header row by scanning for
+    'Subscriber ID (Detail Case #)' which is always the first column header.
+    Tries rows 0-9. Raises ValueError if not found.
+    """
+    for header_row in range(10):
+        df = pd.read_excel(path, header=header_row, engine="openpyxl", dtype=str)
+        if "Subscriber ID (Detail Case #)" in df.columns:
+            return df
+    raise ValueError(
+        f"Could not find expected headers in {path.name}. "
+        "Ensure 'Subscriber ID (Detail Case #)' column is selected in the download modal."
+    )
+
+
 # ─── XLSX append with dedup ───────────────────────────────────────────────────
 
 def _append_deactivated_xlsx(r2_records: list[dict]) -> None:
@@ -439,7 +455,7 @@ async def _run_single_agent(
         return r1, []
 
     # ── Parse export file -> R2 records ───────────────────────────────────────
-    df = _parse_export_file(export_path)
+    df = _read_export(export_path)
 
     log.info("[United] %s: export rows=%d  columns=%s", agent_name, len(df), list(df.columns))
 
