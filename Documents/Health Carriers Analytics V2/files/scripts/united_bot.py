@@ -195,11 +195,12 @@ def _build_r2_records(
 
     df = df.copy()
 
-    # Filter out Active rows — keep everything else (terminated value TBD)
+    # Filter to inactive rows only — planStatus == "I" confirmed from live file
     if COL_POLICY_STATUS in df.columns:
-        df = df[df[COL_POLICY_STATUS].str.strip() != "Active"]
+        df = df[df[COL_POLICY_STATUS].str.strip() == "I"]
 
-    # Parse policyTermDate — M/D/YYYY or YYYY-MM-DD, errors coerced to NaT
+    # Parse policyTermDate — YYYY-MM-DD confirmed from live file; errors="coerce"
+    # handles any format variation without crashing
     df[COL_TERM_DATE] = pd.to_datetime(df[COL_TERM_DATE], errors="coerce")
     df = df.dropna(subset=[COL_TERM_DATE])
     df = df[df[COL_TERM_DATE].dt.date >= period_start]
@@ -393,6 +394,16 @@ async def _run_single_agent(
                 await page.locator(SEL_PASSWORD).wait_for(state="visible", timeout=15_000)
                 await page.locator(SEL_PASSWORD).click()
                 await page.locator(SEL_PASSWORD).type(agent["pass"], delay=50)
+
+                # Verify the field was actually filled — fallback to manual if empty
+                filled_value = await page.locator(SEL_PASSWORD).input_value()
+                if not filled_value:
+                    print(
+                        f"\n[United] [{agent['name']}] Password field empty after type() — "
+                        f"fill it manually in the browser, then press ENTER..."
+                    )
+                    input()
+
                 await page.click(SEL_LOGIN_BTN)
                 last_exc = None
                 break
