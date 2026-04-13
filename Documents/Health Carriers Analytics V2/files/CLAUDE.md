@@ -51,13 +51,13 @@ Missing carrier data (failed run) = **blank cell**, never zero.
 | **Ambetter** | broker.ambetterhealth.com | user+pass, no 2FA | Dashboard odometer | requests+cookies → base64 ZIP | Selenium + requests | 2 | ✅ DONE |
 | **Oscar** | accounts.hioscar.com | MS Authenticator (boss phone) SEMI-AUTO | CSV → sum Lives non-Inactive | Same CSV, Inactive rows + date filter | **Playwright** | 4 | ✅ DONE |
 | **Cigna** | cignaforbrokers.com | USA VPN + email 2FA (webmail.ligagent.com) | BOB filter → Total results | Portal export: Terminated + date filter | **Playwright** | 5 | ✅ DONE |
-| **United** | uhcjarvis.com | MS Authenticator (boss phone) SEMI-AUTO | Dashboard count | Delta diff vs state file | **Playwright** | 6 | ⏳ NEXT |
+| **United** | uhcjarvis.com | MS Authenticator (boss phone) SEMI-AUTO | Dashboard count | file_extract — Terminated export + Termination Date filter | **Playwright** | 6 | ⏳ NEXT |
 
 ### Phase Order Rationale
 - **Oscar before Cigna:** Oscar is the simplest new carrier (semi-auto, single CSV, no 2FA).
   Correct surface to learn Playwright before tackling Cigna's VPN+2FA complexity.
 - **Oscar before United:** `oscar_report.py` already existed. Phase 4 wrapped automation around it.
-- **United last among new carriers:** Delta diff logic is the complexity, not the browser layer.
+- **United last among new carriers:** Originally planned as delta diff (no term date assumed). Confirmed from live export that Termination Date is present — R2 uses file_extract identical to Oscar/Molina.
 - **Molina + Ambetter stay on Selenium:** Both production and working. Migration in Phase 9 only.
 
 **Login architecture:** ALL carriers use **agent-level login** (one session per agent).
@@ -92,8 +92,8 @@ data/
 └── state/
     ├── molina_last_run_date.txt
     ├── ambetter_last_run_date.txt
-    ├── cigna_last_run_date.txt
-    └── united_last_run.json
+    └── cigna_last_run_date.txt
+    # Note: No state file for United — file_extract uses calculate_period_start() + dedup key
 
 logs/run_YYYYMMDD_HHMM.log
 status/last_run.json
@@ -124,12 +124,12 @@ status/last_run.json
     "carrier":           "Ambetter",
     "agent_name":        "Brandon Kaplan",  # ALWAYS from agents.yaml, never from CSV
     "member_name":       "Emily Rink",
-    "member_dob":        "07/24/2000",      # null for Cigna — not available in export
+    "member_dob":        "07/24/2000",      # null for Cigna and United — not available in export
     "state":             "SC",
     "coverage_end_date": "2026-03-31",
     "policy_number":     "U70066328",
     "last_status":       "Cancelled",
-    "detection_method":  "download_filter",  # "file_extract" | "download_filter" | "delta_diff"
+    "detection_method":  "download_filter",  # "file_extract" | "download_filter"
 }
 ```
 
@@ -149,6 +149,9 @@ Rationale confirmed from live data (April 7, 2026 run):
   Real dates, not end-of-month rounding.
 - **Cigna:** Mixed — actual cancellation dates reflected (Mar 31, Apr 1, Apr 2).
   Real dates, not end-of-month rounding.
+- **United:** Real cancellation dates confirmed from live export (e.g., 1/7/2026, 2/26/2026).
+  Termination Date stored as M/D/YYYY string — parse with `pd.to_datetime(format="%m/%d/%Y")`.
+  NOT end-of-month. Behaves like Ambetter and Cigna.
 
 **Conclusion:** Using `last Friday` as period_start misses the bulk of Molina and Oscar
 deactivations, which are always stamped at month-end. Anchoring to last day of previous
@@ -210,7 +213,7 @@ pandas, write once.
 
 **Rules:**
 - R2 **always runs** including first run. Calendar window is the only filter.
-- State files **never** used as R2 date filters. Exception: United delta diff.
+- State files **never** used as R2 date filters.
 - `agent_name` **always** from `agents.yaml`. Ambetter's `Payable Agent` column = `Plan Advisors, LLC` (broker entity) — never use it.
 
 ---
@@ -445,6 +448,7 @@ python scripts/molina_downloader.py --agent 14
 python scripts/ambetter_bot.py --agent 15
 python scripts/oscar_bot.py --agent 2
 python scripts/cigna_bot.py --agent 2
+python scripts/united_bot.py --agent 2
 ```
 
 State file will NOT update on single-agent runs. Acceptable by design.
@@ -481,9 +485,50 @@ while True:
 full_df = pd.concat(all_rows, ignore_index=True)
 ```
 
+### 8.17 United — Delta Diff Not Needed (RESOLVED before build)
+
+**Original assumption:** United portal had no Termination Date column, requiring delta
+diff against `data/state/united_last_run.json` to detect newly-inactive members.
+
+**Confirmed from live export (`BookOfBusinessExport-03242026.xlsx`):**
+- `Termination Date` column IS present with real cancellation dates (e.g., 1/7/2026, 2/26/2026).
+- Dates stored as M/D/YYYY strings — parse with `pd.to_datetime(format="%m/%d/%Y")`.
+- `member_dob` is NOT in the export — all United R2 records: `member_dob = null`.
+- `Subscriber ID (Detail Case #)` is the stable member ID → maps to `policy_number`.
+- `Writing Agent` column present but must never be used as `agent_name` (use agents.yaml).
+
+**Resolution:** Architecture revised before build. United uses `file_extract` (identical
+to Molina and Oscar): download Terminated export, filter by
+`Termination Date >= calculate_period_start()`, build R2 records. No state file required.
+Standard dedup key `(carrier, policy_number, coverage_end_date)` handles re-capture
+across consecutive runs.
+
+`detection_method = "file_extract"` for all United R2 records.
+`coverage_end_date` = Termination Date stored as ISO date string (not null).
+
 ---
 
-## 9. CONFIRMED COLUMN NAMES
+### 8.18 Ambetter — Login Selector Changed (RESOLVED April 2026)
+
+Portal quietly changed the username input `placeholder` attribute from `"Email"` to
+`"Username"`. The bot crashed before submitting credentials — blank
+`GetHandleVerifier` stacktraces, no `"credentials submitted"` log line.
+
+**Fix:** One-line change in `config/config.yaml`:
+```yaml
+# carriers.ambetter.selectors
+email_field: "input[placeholder='Username'][type='text']"   # was 'Email'
+```
+
+**If this happens again:** run the diagnostic mode to inspect the live DOM without
+triggering a login attempt:
+```bash
+python scripts/ambetter_bot.py --debug-selectors
+```
+Opens `logs/ambetter_login_page_source.html` — search for `<input` to find the
+current `placeholder` value. **Update `config.yaml` only — never the `.py` file.**
+
+---
 
 ### Ambetter (live CSV, all cancelled)
 ```yaml
@@ -535,6 +580,22 @@ writing_agent:    "Writing Agent"       # Use for agent matching
 policy_status:    "Policy Status"       # "Terminated" for R2 records
 ```
 
+### United (live XLSX export — BookOfBusinessExport-03242026.xlsx)
+```yaml
+termination_date: "Termination Date"              # Real date, M/D/YYYY string — NOT end-of-month
+                                                   # Parse: pd.to_datetime(format="%m/%d/%Y")
+first_name:       "Primary First Name"
+last_name:        "Primary Last Name"
+policy_number:    "Subscriber ID (Detail Case #)" # Same column name as Cigna
+state:            "State"
+member_dob:       null                             # NOT available in United export — permanent
+writing_agent:    "Writing Agent"                  # DO NOT USE — always source agent_name from agents.yaml
+policy_status:    "Policy Status"                  # "Terminated" for R2 records
+coverage_status:  "Coverage Status"                # mirrors Policy Status
+```
+
+United R2 filter: `Policy Status == "Terminated"` AND `Termination Date >= calculate_period_start()`
+
 ---
 
 ## 10. STATE FILE RULES
@@ -544,7 +605,9 @@ policy_status:    "Policy Status"       # "Terminated" for R2 records
 | `molina_last_run_date.txt` | First-run detection | Full success only (all 15 agents) |
 | `ambetter_last_run_date.txt` | First-run detection | Full success only (all 16 agents) |
 | `cigna_last_run_date.txt` | First-run detection | Full success only |
-| `united_last_run.json` | Previous inactive list for delta diff | Full success only |
+
+United has no state file. R2 uses `calculate_period_start()` date filter + dedup key.
+See section 8.17.
 
 ---
 
@@ -558,7 +621,7 @@ policy_status:    "Policy Status"       # "Terminated" for R2 records
 | Ambetter | **Selenium + requests** | Production. requests bypass handles SPA. Do not touch. |
 | Oscar | **Playwright** | ✅ Production. Validates Playwright pattern for Cigna + United. |
 | Cigna | **Playwright** | After Oscar confirms pattern — NEXT |
-| United | **Playwright** | Delta diff is hard part, not browser |
+| United | **Playwright** | file_extract with Termination Date filter — no delta diff needed |
 | Molina + Ambetter | **Playwright** (Phase 9) | After all 5 carriers live |
 
 **Puppeteer rejected:** Node.js only. All logic is Python.
@@ -617,7 +680,7 @@ google-auth
 | 3 | Google Sheets: Summary pivot + dual-tab writer | — | ✅ DONE |
 | 4 | Oscar: semi-auto + R1 + R2 | **Playwright** | ✅ DONE |
 | 5 | Cigna: VPN + email 2FA + R1 + R2 | **Playwright** | ✅ DONE |
-| 6 | United: semi-auto + delta R2 | **Playwright** | ⏳ NEXT |
+| 6 | United: semi-auto + file_extract R2 (Termination Date filter) | **Playwright** | ⏳ NEXT |
 | 7 | Looker Studio dashboard (6 pages) | — | ⏳ |
 | 8 | main.py orchestrator + Windows Task Scheduler | — | ⏳ |
 | 9 | Migrate Molina + Ambetter to Playwright | **Playwright** | 🔮 Future |
@@ -669,4 +732,7 @@ resolved (offset loop, 334 rows/page). Ambetter data lag confirmed — cancellat
 in export days to weeks after dropping from active count. period_start fixed to last day
 of previous month across all bots. R2 dedup key (carrier, policy_number, coverage_end_date)
 added to all _append_deactivated_xlsx() implementations. Root .gitignore added to protect
-home directory from accidental staging.*
+home directory from accidental staging. United delta diff architecture scrapped — live
+export confirms Termination Date present with real dates (M/D/YYYY). United uses
+file_extract identical to Molina/Oscar. No united_last_run.json state file. United
+column names confirmed and added to section 9. member_dob null for United (permanent).*
