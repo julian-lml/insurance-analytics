@@ -517,6 +517,7 @@ async def _run_all_agents_async(
         async with async_playwright() as p:
             browser = await p.chromium.launch(
                 headless=headless,
+                channel="chrome",
                 args=["--disable-blink-features=AutomationControlled"],
             )
             context = await browser.new_context(
