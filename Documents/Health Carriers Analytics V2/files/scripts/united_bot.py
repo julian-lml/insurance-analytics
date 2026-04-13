@@ -335,18 +335,18 @@ def _write_united_xlsx(r1_records: list[dict]) -> None:
 
 async def _run_single_agent(
     agent: dict,
+    context,            # playwright BrowserContext — owned and closed by caller
     dry_run: bool,
     run_date: str,
     run_type: str,
-    headless: bool,
 ) -> tuple[dict, list[dict]]:
     """
     Full browser flow for one United agent.
+    Receives a fresh BrowserContext per call — browser lifecycle is managed
+    by _run_all_agents_async (one playwright + browser per agent).
     Returns (r1_record, r2_records).
     Raises on unrecoverable error — caller wraps in try/except.
     """
-    from playwright.async_api import async_playwright
-
     agent_name = agent["name"]
     t_start = time.monotonic()
 
@@ -359,116 +359,102 @@ async def _run_single_agent(
     dl_dir.mkdir(parents=True, exist_ok=True)
 
     period_start = calculate_period_start()
+    export_path: Path | None = None
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            headless=headless,
-            args=["--disable-blink-features=AutomationControlled"],
-        )
-        context = await browser.new_context(
-            accept_downloads=True,
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-            ),
-        )
-        page = await context.new_page()
+    page = await context.new_page()
 
-        # ── Login (retry on page-load failure, NOT on auth failure) ───────────
-        # Sequence (CLAUDE.md §8.18):
-        #   1. Load sign-in page
-        #   2. Click SSO button → redirects to One Healthcare ID (Optum domain)
-        #   3. Wait for One Healthcare ID redirect (identity.onehealthcareid.com)
-        #   4. Fill username + click Login
-        #   5. Fill password + click Login
-        backoffs = [5, 15, 45]
-        last_exc: Exception | None = None
+    # ── Login (retry on page-load failure, NOT on auth failure) ───────────
+    # Sequence (CLAUDE.md §8.18):
+    #   1. Load sign-in page
+    #   2. Click SSO button → redirects to One Healthcare ID (Optum domain)
+    #   3. Wait for One Healthcare ID redirect (identity.onehealthcareid.com)
+    #   4. Fill username + click Login
+    #   5. Fill password + click Login
+    backoffs = [5, 15, 45]
+    last_exc: Exception | None = None
 
-        for attempt, backoff in enumerate(backoffs, start=1):
-            try:
-                await page.goto(SIGN_IN_URL, wait_until="domcontentloaded")
-                await page.click(SEL_SSO_BTN)
-                await page.wait_for_url("**onehealthcareid.com**", timeout=15_000)
-                await page.fill(SEL_USERNAME, agent["user"])
-                await page.click(SEL_LOGIN_BTN)
-                await page.locator(SEL_PASSWORD).wait_for(state="visible", timeout=15_000)
-                await page.locator(SEL_PASSWORD).click()
-                await page.locator(SEL_PASSWORD).type(agent["pass"], delay=50)
+    for attempt, backoff in enumerate(backoffs, start=1):
+        try:
+            await page.goto(SIGN_IN_URL, wait_until="domcontentloaded")
+            await page.click(SEL_SSO_BTN)
+            await page.wait_for_url("**onehealthcareid.com**", timeout=15_000)
+            await page.fill(SEL_USERNAME, agent["user"])
+            await page.click(SEL_LOGIN_BTN)
+            await page.locator(SEL_PASSWORD).wait_for(state="visible", timeout=15_000)
+            await page.locator(SEL_PASSWORD).click()
+            await page.locator(SEL_PASSWORD).type(agent["pass"], delay=50)
 
-                # Verify the field was actually filled — fallback to manual if empty
-                filled_value = await page.locator(SEL_PASSWORD).input_value()
-                if not filled_value:
-                    print(
-                        f"\n[United] [{agent['name']}] Password field empty after type() — "
-                        f"fill it manually in the browser, then press ENTER..."
-                    )
-                    input()
-
-                await page.click(SEL_LOGIN_BTN)
-                last_exc = None
-                break
-            except Exception as exc:
-                last_exc = exc
-                log.warning(
-                    f"[United] {agent_name}: login attempt {attempt}/3 failed — {exc}"
+            # Verify the field was actually filled — fallback to manual if empty
+            filled_value = await page.locator(SEL_PASSWORD).input_value()
+            if not filled_value:
+                print(
+                    f"\n[United] [{agent['name']}] Password field empty after type() — "
+                    f"fill it manually in the browser, then press ENTER..."
                 )
-                if attempt < len(backoffs):
-                    await asyncio.sleep(backoff)
+                input()
 
-        if last_exc:
-            await browser.close()
-            raise last_exc
-
-        # ── MFA pause — human approves MS Authenticator ───────────────────────
-        print(f"\n[United] Agent: {agent_name}")
-        print("[United] Approve Microsoft Authenticator on the boss's phone, then press ENTER...")
-        input()
-
-        # Wait for dashboard to fully load before any further interaction
-        await page.locator(SEL_ACTIVE_COUNT).wait_for(timeout=20_000)
-        log.info("[United] %s: dashboard loaded", agent_name)
-
-        # ── R1: read active count from dashboard ─────────────────────────────
-        # UHC Jarvis shows active member count in p#activemembercount.
-        # Human navigates to the Book of Business dashboard; bot reads the label.
-
-        print(f"\n[United -- {agent_name}] R1 COUNT -- do this in the browser:")
-        print("  1. Navigate to Book of Business so the active member count is visible")
-        print("  2. Press ENTER — bot will read the count automatically")
-        input()
-
-        count_text = await page.locator(SEL_ACTIVE_COUNT).first.inner_text(timeout=8000)
-        match = re.search(r"([\d,]+)", count_text)
-        if not match:
-            raise ValueError(
-                f"[United] {agent_name}: could not parse R1 count from '{count_text}'"
+            await page.click(SEL_LOGIN_BTN)
+            last_exc = None
+            break
+        except Exception as exc:
+            last_exc = exc
+            log.warning(
+                f"[United] {agent_name}: login attempt {attempt}/3 failed — {exc}"
             )
-        active_members = int(match.group(1).replace(",", ""))
-        log.info(
-            "[United] %s: R1 active_members=%d (raw: '%s')",
-            agent_name, active_members, count_text.strip(),
+            if attempt < len(backoffs):
+                await asyncio.sleep(backoff)
+
+    if last_exc:
+        raise last_exc
+
+    # ── MFA pause — human approves MS Authenticator ───────────────────────
+    print(f"\n[United] Agent: {agent_name}")
+    print("[United] Approve Microsoft Authenticator on the boss's phone, then press ENTER...")
+    input()
+
+    # Wait for dashboard to fully load before any further interaction
+    await page.locator(SEL_ACTIVE_COUNT).wait_for(timeout=20_000)
+    log.info("[United] %s: dashboard loaded", agent_name)
+
+    # ── R1: read active count from dashboard ─────────────────────────────
+    # UHC Jarvis shows active member count in p#activemembercount.
+    # Human navigates to the Book of Business dashboard; bot reads the label.
+
+    print(f"\n[United -- {agent_name}] R1 COUNT -- do this in the browser:")
+    print("  1. Navigate to Book of Business so the active member count is visible")
+    print("  2. Press ENTER — bot will read the count automatically")
+    input()
+
+    count_text = await page.locator(SEL_ACTIVE_COUNT).first.inner_text(timeout=8000)
+    match = re.search(r"([\d,]+)", count_text)
+    if not match:
+        raise ValueError(
+            f"[United] {agent_name}: could not parse R1 count from '{count_text}'"
         )
+    active_members = int(match.group(1).replace(",", ""))
+    log.info(
+        "[United] %s: R1 active_members=%d (raw: '%s')",
+        agent_name, active_members, count_text.strip(),
+    )
 
-        duration_r1 = time.monotonic() - t_start
-        r1 = _build_r1_record(agent_name, active_members, run_date, run_type, duration_r1)
+    duration_r1 = time.monotonic() - t_start
+    r1 = _build_r1_record(agent_name, active_members, run_date, run_type, duration_r1)
 
-        # ── R2: wait for human-triggered download ────────────────────────────
-        # Bot registers the download listener first, then prints instructions.
-        # Human applies Terminated filter, clicks Download, selects columns,
-        # and clicks Download in the modal. The download event fires automatically.
+    # ── R2: wait for human-triggered download ────────────────────────────
+    # Bot registers the download listener first, then prints instructions.
+    # Human applies Terminated filter, clicks Download, selects columns,
+    # and clicks Download in the modal. The download event fires automatically.
 
-        print(f"\n[United -- {agent_name}] R2 EXPORT -- do this in the browser:")
-        print("  1. Navigate to the Book of Business export section")
-        print(f"  2. Apply filter: Terminated, Termination Date on/after {period_start.strftime('%m/%d/%Y')}")
-        print("  3. Click Download, select columns, click Download in the modal")
-        print("  (bot is listening — do NOT press ENTER, just complete the download)")
+    print(f"\n[United -- {agent_name}] R2 EXPORT -- do this in the browser:")
+    print("  1. Navigate to the Book of Business export section")
+    print(f"  2. Apply filter: Terminated, Termination Date on/after {period_start.strftime('%m/%d/%Y')}")
+    print("  3. Click Download, select columns, click Download in the modal")
+    print("  (bot is listening — do NOT press ENTER, just complete the download)")
 
-        download = await page.wait_for_event("download", timeout=180_000)
-        export_path = dl_dir / download.suggested_filename
-        await download.save_as(export_path)
-        log.info("[United] %s: downloaded %s -> %s", agent_name, download.suggested_filename, export_path)
-
-        await browser.close()
+    download = await page.wait_for_event("download", timeout=180_000)
+    export_path = dl_dir / download.suggested_filename
+    await download.save_as(export_path)
+    log.info("[United] %s: downloaded %s -> %s", agent_name, download.suggested_filename, export_path)
 
     if export_path is None:
         log.info("[United] %s: R1 active=%d  R2 records=0", agent_name, r1["active_members"])
@@ -514,18 +500,37 @@ async def _run_all_agents_async(
     run_type: str,
     headless: bool,
 ) -> tuple[list[dict], list[dict]]:
+    from playwright.async_api import async_playwright
+
     all_r1: list[dict] = []
     all_r2: list[dict] = []
 
     for agent in agents:
-        try:
-            r1_record, r2_records = await _run_single_agent(
-                agent, dry_run, run_date, run_type, headless
+        # Fresh playwright + browser + context per agent — prevents fingerprint
+        # accumulation that causes identity.onehealthcareid.com to reject input
+        # after 5-6 sequential logins from the same browser instance.
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(
+                headless=headless,
+                args=["--disable-blink-features=AutomationControlled"],
             )
-        except Exception as exc:
-            log.error(f"[United] {agent['name']}: unhandled error — {exc}", exc_info=True)
-            r1_record = _failed_r1(agent["name"], run_date, run_type, str(exc))
-            r2_records = []
+            context = await browser.new_context(
+                accept_downloads=True,
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                ),
+            )
+            try:
+                r1_record, r2_records = await _run_single_agent(
+                    agent, context, dry_run, run_date, run_type
+                )
+            except Exception as exc:
+                log.error(f"[United] {agent['name']}: unhandled error — {exc}", exc_info=True)
+                r1_record = _failed_r1(agent["name"], run_date, run_type, str(exc))
+                r2_records = []
+            finally:
+                await browser.close()
 
         if r1_record:
             all_r1.append(r1_record)
