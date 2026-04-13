@@ -502,7 +502,7 @@ async def _run_all_agents_async(
 
 
 def _print_dry_run_summary(r1_records: list[dict], r2_records: list[dict]) -> None:
-    print("\n── United DRY RUN summary ───────────────────────────────")
+    print("\n-- United DRY RUN summary ------------------------------")
     for r in r1_records:
         status = "OK" if r["status"] == "success" else "!!"
         print(f"  {status} {r['agent_name']:25s}  active={r['active_members']}")
@@ -517,7 +517,7 @@ def _print_dry_run_summary(r1_records: list[dict], r2_records: list[dict]) -> No
             )
     else:
         print(f"  (0 R2 records for period starting {calculate_period_start()})")
-    print("─────────────────────────────────────────────────────────\n")
+    print("--------------------------------------------------------\n")
 
 
 # ─── Public sync wrapper ──────────────────────────────────────────────────────
