@@ -52,7 +52,7 @@ carriers:
     selectors:
       # Stable CSS selectors — Salesforce Lightning numeric IDs (e.g. id="175:0")
       # are regenerated every session and must never be used as selectors.
-      email_field:       "input[placeholder='Email'][type='text']"
+      email_field:       "input[placeholder='Username'][type='text']"
       password_field:    "input[placeholder='Password'][type='password']"
       # XPath for login button — the span text is the only stable hook
       login_button:      "xpath://button[.//span[normalize-space()='Log in']]"
