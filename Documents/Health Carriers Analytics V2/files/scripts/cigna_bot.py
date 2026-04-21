@@ -33,8 +33,7 @@ import logging
 import re
 import sys
 import time
-from calendar import monthrange
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -44,39 +43,38 @@ from dotenv import load_dotenv
 load_dotenv()
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 
-# ─── Logging ──────────────────────────────────────────────────────────────────
-
-def _setup_logging() -> None:
-    log_dir = ROOT / "logs"
-    log_dir.mkdir(exist_ok=True)
-    from datetime import datetime
-    log_file = log_dir / f"run_{datetime.now().strftime('%Y%m%d_%H%M')}.log"
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s | cigna | %(levelname)s | %(message)s",
-        handlers=[
-            logging.FileHandler(log_file, encoding="utf-8"),
-            logging.StreamHandler(sys.stdout),
-        ],
-    )
+from scripts.utils import (
+    setup_logging,
+    run_type,
+    get_r2_start_date,
+    write_r1_xlsx,
+    append_deactivated_xlsx,
+)
 
 log = logging.getLogger(__name__)
 
-# ─── Column constants — must match config/config.yaml carriers.cigna.columns ──
+# ─── Column constants — pulled from config.yaml carriers.cigna.columns ────────
 
-COL_TERM_DATE   = "Termination Date"
-COL_FIRST_NAME  = "Primary First Name"
-COL_LAST_NAME   = "Primary Last Name"
-COL_POLICY_NUM  = "Subscriber ID (Detail Case #)"
-COL_STATE       = "State"
+_CFG_PATH = ROOT / "config" / "config.yaml"
+with open(_CFG_PATH, encoding="utf-8") as _f:
+    _CFG = yaml.safe_load(_f)
+_COLS = _CFG["carriers"]["cigna"]["columns"]
+COL_TERM_DATE   = _COLS["termination_date"]
+COL_FIRST_NAME  = _COLS["first_name"]
+COL_LAST_NAME   = _COLS["last_name"]
+COL_POLICY_NUM  = _COLS["policy_number"]
+COL_STATE       = _COLS["state"]
 
-# ─── Selectors — must match config/config.yaml carriers.cigna.selectors ───────
+# ─── Selectors — pulled from config.yaml carriers.cigna.selectors ─────────────
 
-PORTAL_URL              = "https://cignaforbrokers.com/public/login"
-SEL_USERNAME            = "[data-test-id='username']"
-SEL_PASSWORD            = "[data-test-id='password']"
-SEL_LOGIN_BTN           = "button[type='submit']"
+_CIG  = _CFG["carriers"]["cigna"]
+_CSEL = _CIG["selectors"]
+PORTAL_URL              = _CIG["portal_url"]
+SEL_USERNAME            = _CSEL["username"]
+SEL_PASSWORD            = _CSEL["password"]
+SEL_LOGIN_BTN           = _CSEL["login_button"]
 # 2FA selectors — tried in order until one resolves (portal changes between sessions)
 _PASSCODE_CANDIDATES = [
     "input[formcontrolname='passcode']",
@@ -84,38 +82,12 @@ _PASSCODE_CANDIDATES = [
     "input[type='text'][name='passcode']",
     "input[placeholder*='code' i]",
 ]
-SEL_PASSCODE_SUBMIT     = "button[type='submit']"
-SEL_PRIVATE_NET_CONT    = "text=Continue"
-SEL_INDIVIDUAL_FAMILY   = "[data-test-id='left-nav-menu'] >> text=Individual and Family"
-SEL_BOOK_OF_BUSINESS    = "text=Book of Business"
-SEL_TOTAL_RESULTS       = "label.pr-5"
-SEL_EXPORT              = "button >> text='Export Filtered'"
-
-# ─── Date scoping — CLAUDE.md §6 ─────────────────────────────────────────────
-
-def calculate_period_start(today: date = None) -> date:
-    """
-    Returns the last day of the previous month.
-
-    Rationale: Molina and Oscar stamp all terminations at end-of-month.
-    Anchoring to last day of previous month captures everything correctly.
-    Dedup key (carrier, policy_number, coverage_end_date) prevents
-    double-counting across runs. See CLAUDE.md §6.
-    """
-    if today is None:
-        today = date.today()
-    first_of_this_month = today.replace(day=1)
-    last_of_prev_month = first_of_this_month - timedelta(days=1)
-    return last_of_prev_month
-
-
-def _run_type() -> str:
-    weekday = date.today().weekday()
-    if weekday == 0:
-        return "Monday"
-    elif weekday == 4:
-        return "Friday"
-    return "Manual"
+SEL_PASSCODE_SUBMIT     = _CSEL["passcode_submit"]
+SEL_PRIVATE_NET_CONT    = _CSEL["private_network_continue"]
+SEL_INDIVIDUAL_FAMILY   = _CSEL["individual_family"]
+SEL_BOOK_OF_BUSINESS    = _CSEL["book_of_business"]
+SEL_TOTAL_RESULTS       = _CSEL["total_results_label"]
+SEL_EXPORT              = _CSEL["export_filtered"]
 
 
 # ─── Config / agents ──────────────────────────────────────────────────────────
@@ -183,7 +155,7 @@ def _build_r2_records(
     Terminated rows where Termination Date >= period_start.
     member_dob is always None — not available in Cigna export (CLAUDE.md §8.12).
     """
-    period_start = calculate_period_start()
+    period_start = get_r2_start_date()
 
     df = df.copy()
     df[COL_TERM_DATE] = pd.to_datetime(df[COL_TERM_DATE], errors="coerce")
@@ -218,116 +190,6 @@ def _parse_export_file(file_path: Path) -> pd.DataFrame:
     if file_path.suffix.lower() == ".csv":
         return pd.read_csv(file_path)
     return pd.read_excel(file_path, engine="openpyxl")
-
-
-# ─── XLSX append with dedup ───────────────────────────────────────────────────
-
-def _append_deactivated_xlsx(r2_records: list[dict]) -> None:
-    """
-    Append R2 records to shared deactivated_members.xlsx.
-    Dedup key: (carrier, policy_number, coverage_end_date).
-    Existing rows always win (keep="first"). CLAUDE.md §6.
-    Logs found / already_in_file / net_new_appended counts.
-    """
-    if not r2_records:
-        return
-
-    found_count = len(r2_records)
-
-    # Null policy_number guard — skip and warn before any append
-    clean_records: list[dict] = []
-    for rec in r2_records:
-        pn = rec.get("policy_number")
-        if not pn or (isinstance(pn, str) and not pn.strip()):
-            log.warning(
-                "Cigna | R2 | skipping — policy_number is null | member=%s | agent=%s",
-                rec.get("member_name", "UNKNOWN"), rec.get("agent_name", "UNKNOWN"),
-            )
-        else:
-            clean_records.append(rec)
-
-    valid_count = len(clean_records)
-
-    if not clean_records:
-        log.info(
-            "Cigna | R2 | found=%d | already_in_file=%d | net_new_appended=%d",
-            found_count, 0, 0,
-        )
-        return
-
-    output_path = ROOT / "data" / "output" / "deactivated_members.xlsx"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    new_df = pd.DataFrame(clean_records)
-    cols = [
-        "run_date", "carrier", "agent_name", "member_name",
-        "member_dob", "state", "coverage_end_date", "policy_number",
-        "last_status", "detection_method",
-    ]
-    new_df = new_df[[c for c in cols if c in new_df.columns]]
-
-    if output_path.exists():
-        existing_df = pd.read_excel(output_path, engine="openpyxl")
-        rows_before = len(existing_df)
-        combined_df = pd.concat([existing_df, new_df], ignore_index=True)
-    else:
-        rows_before = 0
-        combined_df = new_df
-
-    combined_df = combined_df.drop_duplicates(
-        subset=["carrier", "policy_number", "coverage_end_date"],
-        keep="first",
-    )
-
-    net_new = len(combined_df) - rows_before
-    already_in_file = valid_count - net_new
-
-    try:
-        with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
-            combined_df.to_excel(writer, index=False, sheet_name="Deactivated Members")
-    except Exception as exc:
-        log.warning("Cigna | XLSX write failed — %s. Continuing.", exc)
-        return
-
-    log.info(
-        "Cigna | R2 | found=%d | already_in_file=%d | net_new_appended=%d",
-        found_count, already_in_file, net_new,
-    )
-
-
-# ─── R1 XLSX writer ───────────────────────────────────────────────────────────
-
-def _write_cigna_xlsx(r1_records: list[dict]) -> None:
-    """Write R1 records to data/output/cigna_all_agents.xlsx (overwrite each run)."""
-    if not r1_records:
-        return
-
-    output_path = ROOT / "data" / "output" / "cigna_all_agents.xlsx"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    cols = [
-        "run_date", "run_type", "carrier", "agent_name", "active_members",
-        "status", "error_message", "duration_seconds",
-    ]
-    new_df = pd.DataFrame(r1_records)
-    new_df = new_df[[c for c in cols if c in new_df.columns]]
-
-    if output_path.exists():
-        existing_df = pd.read_excel(output_path, engine="openpyxl")
-        agent_names = new_df["agent_name"].unique().tolist()
-        existing_df = existing_df[~existing_df["agent_name"].isin(agent_names)]
-        df = pd.concat([existing_df, new_df], ignore_index=True)
-    else:
-        df = new_df
-
-    df = df.sort_values("active_members", ascending=False)
-
-    try:
-        with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
-            df.to_excel(writer, index=False, sheet_name="Active Members")
-        log.info("[Cigna] wrote cigna_all_agents.xlsx — %d agents", len(df))
-    except Exception as exc:
-        log.warning(f"[Cigna] cigna_all_agents.xlsx write failed — {exc}. Continuing.")
 
 
 # ─── State file ───────────────────────────────────────────────────────────────
@@ -367,7 +229,7 @@ async def _run_single_agent(
     )
     dl_dir.mkdir(parents=True, exist_ok=True)
 
-    period_start = calculate_period_start()
+    period_start = get_r2_start_date()
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=headless)
@@ -571,8 +433,9 @@ async def _run_all_agents_async(
     success_count = sum(1 for r in all_r1 if r["status"] == "success")
 
     if not dry_run:
-        _append_deactivated_xlsx(all_r2)
-        _write_cigna_xlsx(all_r1)
+        success_r1 = [r for r in all_r1 if r["status"] == "success"]
+        write_r1_xlsx(success_r1, "Cigna", log)
+        append_deactivated_xlsx(all_r2, "Cigna", log)
         # State file — only on full success (CLAUDE.md §10)
         if success_count == len(agents):
             _update_state_file(run_date)
@@ -599,7 +462,7 @@ def _print_dry_run_summary(r1_records: list[dict], r2_records: list[dict]) -> No
         print(f"  {status} {r['agent_name']:25s}  active={r['active_members']}")
     print(f"\n  R2 records this period: {len(r2_records)}")
     if r2_records:
-        period_start = calculate_period_start()
+        period_start = get_r2_start_date()
         print(f"  Period start: {period_start}  (member_dob always null for Cigna)")
         for rec in r2_records:
             print(
@@ -607,23 +470,40 @@ def _print_dry_run_summary(r1_records: list[dict], r2_records: list[dict]) -> No
                 f"end={rec['coverage_end_date']}  policy={rec['policy_number']}"
             )
     else:
-        print(f"  (0 R2 records for period starting {calculate_period_start()})")
+        print(f"  (0 R2 records for period starting {get_r2_start_date()})")
     print("─────────────────────────────────────────────────────────\n")
 
 
 # ─── Public sync wrapper ──────────────────────────────────────────────────────
 
-def run_cigna(dry_run: bool = False) -> tuple[list[dict], list[dict]]:
+def run_cigna(
+    dry_run: bool = False,
+    agent_filter: int | None = None,
+    headless: bool = False,
+) -> tuple[list[dict], list[dict]]:
     """
-    Sync wrapper — called by main.py in Phase 8.
+    Public API. Called by launcher or standalone.
     Returns (r1_records, r2_records).
     VPN must be active before calling.
     """
+    global log
+    log = setup_logging("CIGNA")
+
     agents   = _load_agents()
     run_date = date.today().isoformat()
-    run_type = _run_type()
+    rt       = run_type()
+
+    if agent_filter is not None:
+        if agent_filter >= len(agents):
+            raise IndexError(
+                f"--agent {agent_filter} out of range "
+                f"(0–{len(agents) - 1} available)"
+            )
+        agents = [agents[agent_filter]]
+        log.info(f"[Cigna] Single-agent mode: {agents[0]['name']}")
+
     return asyncio.run(
-        _run_all_agents_async(agents, dry_run, run_date, run_type, headless=False)
+        _run_all_agents_async(agents, dry_run, run_date, rt, headless)
     )
 
 
@@ -631,53 +511,13 @@ def run_cigna(dry_run: bool = False) -> tuple[list[dict], list[dict]]:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Phase 5 — Cigna Playwright bot",
+        description="Cigna Playwright bot",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=(
-            "examples:\n"
-            "  python scripts/cigna_bot.py\n"
-            "    → all agents, full browser flow, writes XLSX\n\n"
-            "  python scripts/cigna_bot.py --dry-run\n"
-            "    → all agents, full browser flow, no XLSX write, no state update\n\n"
-            "  python scripts/cigna_bot.py --agent 0\n"
-            "    → single agent (Anthony Montenegro), writes XLSX\n\n"
-            "  python scripts/cigna_bot.py --agent 0 --dry-run\n"
-            "    → single agent, no writes\n\n"
-            "  python scripts/cigna_bot.py --headless --dry-run\n"
-            "    → headless browser (2FA prompt still appears in terminal)\n\n"
-            "NOTE: Activate VPN BEFORE running this script."
-        ),
+        epilog="NOTE: Activate VPN BEFORE running this script.",
     )
-    parser.add_argument(
-        "--agent", type=int, default=None,
-        help="Run only agent at index N (0-based) from agents.yaml cigna: key",
-    )
-    parser.add_argument(
-        "--dry-run", action="store_true",
-        help="Full browser flow; no XLSX write, no state update",
-    )
-    parser.add_argument(
-        "--headless", action="store_true",
-        help="Run browser headless (default: headed so you can see the portal)",
-    )
+    parser.add_argument("--agent", type=int, default=None)
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--headless", action="store_true")
     args = parser.parse_args()
 
-    _setup_logging()
-
-    agents   = _load_agents()
-    run_date = date.today().isoformat()
-    run_type = _run_type()
-
-    if args.agent is not None:
-        if args.agent >= len(agents):
-            print(
-                f"Error: --agent {args.agent} out of range "
-                f"(0–{len(agents) - 1} available)"
-            )
-            sys.exit(1)
-        agents = [agents[args.agent]]
-        log.info(f"[Cigna] Single-agent mode: {agents[0]['name']}")
-
-    asyncio.run(
-        _run_all_agents_async(agents, args.dry_run, run_date, run_type, args.headless)
-    )
+    run_cigna(dry_run=args.dry_run, agent_filter=args.agent, headless=args.headless)

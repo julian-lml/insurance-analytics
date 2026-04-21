@@ -49,20 +49,24 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
-from datetime import date, timedelta
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+
+from scripts.utils import (
+    setup_logging,
+    run_type,
+    get_r2_start_date,
+    write_r1_xlsx,
+    append_deactivated_xlsx,
+)
 
 log = logging.getLogger(__name__)
 
 # ── Load config ───────────────────────────────────────────────────────────────
 with open(ROOT / "config" / "config.yaml") as _f:
     _CFG = yaml.safe_load(_f)
-
-with open(ROOT / "config" / "agents.yaml") as _f:
-    _AGENTS_CFG = yaml.safe_load(_f)
 
 # Carrier-level config — all under carriers.ambetter in config.yaml
 _AMB          = _CFG["carriers"]["ambetter"]
@@ -92,91 +96,6 @@ SEL_POLICIES_NAV = _SELS["policies_nav"]
 SEL_CANCELLED    = _SELS["cancelled_button"]
 SEL_EXPORT_BTN   = _SELS["export_button"]
 
-def calculate_period_start(today: date = None) -> date:
-    if today is None:
-        today = date.today()
-    return today.replace(day=1) - timedelta(days=1)
-
-def _append_deactivated_xlsx(r2_records: list[dict]) -> None:
-    """
-    Appends R2 records to the shared deactivated members log.
-    Creates the file if it doesn't exist. Never overwrites existing rows.
-    Dedup key: (carrier, policy_number, coverage_end_date), keep='first'.
-    Logs found / already_in_file / net_new_appended counts.
-    """
-    if not r2_records:
-        return
-
-    found_count = len(r2_records)
-
-    # Null policy_number guard — skip and warn before any append
-    clean_records: list[dict] = []
-    for rec in r2_records:
-        pn = rec.get("policy_number")
-        if not pn or (isinstance(pn, str) and not pn.strip()):
-            log.warning(
-                "Ambetter | R2 | skipping — policy_number is null | member=%s | agent=%s",
-                rec.get("member_name", "UNKNOWN"), rec.get("agent_name", "UNKNOWN"),
-            )
-        else:
-            clean_records.append(rec)
-
-    valid_count = len(clean_records)
-
-    if not clean_records:
-        log.info(
-            "Ambetter | R2 | found=%d | already_in_file=%d | net_new_appended=%d",
-            found_count, 0, 0,
-        )
-        return
-
-    output_path = ROOT / "data" / "output" / "deactivated_members.xlsx"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    new_df = pd.DataFrame(clean_records)
-
-    # Columns to keep, in order
-    cols = [
-        "run_date", "carrier", "agent_name", "member_name",
-        "member_dob", "state", "coverage_end_date", "policy_number",
-        "last_status", "detection_method",
-    ]
-    # Only keep columns that exist (graceful if optional fields missing)
-    cols = [c for c in cols if c in new_df.columns]
-    new_df = new_df[cols]
-
-    if output_path.exists():
-        existing_df = pd.read_excel(output_path, engine="openpyxl")
-        rows_before = len(existing_df)
-        combined_df = pd.concat([existing_df, new_df], ignore_index=True)
-    else:
-        rows_before = 0
-        combined_df = new_df
-
-    combined_df = combined_df.drop_duplicates(
-        subset=["carrier", "policy_number", "coverage_end_date"],
-        keep="first",
-    )
-
-    net_new = len(combined_df) - rows_before
-    already_in_file = valid_count - net_new
-
-    with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
-        combined_df.to_excel(writer, index=False, sheet_name="Deactivated Members")
-        ws = writer.sheets["Deactivated Members"]
-        ws.column_dimensions["A"].width = 14  # run_date
-        ws.column_dimensions["B"].width = 12  # carrier
-        ws.column_dimensions["C"].width = 22  # agent_name
-        ws.column_dimensions["D"].width = 28  # member_name
-        ws.column_dimensions["E"].width = 14  # member_dob
-        ws.column_dimensions["F"].width = 8   # state
-        ws.column_dimensions["G"].width = 20  # coverage_end_date
-        ws.column_dimensions["H"].width = 16  # policy_number
-
-    log.info(
-        "Ambetter | R2 | found=%d | already_in_file=%d | net_new_appended=%d",
-        found_count, already_in_file, net_new,
-    )
 
 def _resolve_selector(selector_str: str) -> tuple:
     """
@@ -200,8 +119,13 @@ def _load_agents() -> list[dict]:
     """
     Load the ambetter agent list from config/agents.yaml under key 'ambetter:'.
     Expected format per entry: {name, user, pass}  — same as Molina.
+
+    Reads the file inside the function — never at import time (CLAUDE.md §8.20).
     """
-    agents = _AGENTS_CFG.get("ambetter", [])
+    agents_path = ROOT / "config" / "agents.yaml"
+    with open(agents_path) as f:
+        agents_cfg = yaml.safe_load(f)
+    agents = agents_cfg.get("ambetter", [])
     if not agents:
         raise ValueError(
             "No agents found under 'ambetter:' in config/agents.yaml.\n"
@@ -585,8 +509,7 @@ def _build_r2_records(
 
     df["_term_date"] = pd.to_datetime(df[COL_TERM_DATE], errors="coerce").dt.date
 
-    from datetime import date
-    period_start = calculate_period_start()
+    period_start = get_r2_start_date()
     period_df = df[df["_term_date"] >= period_start].copy()
     log.info(
         "ambetter | [%s] R2: %d records (Policy Term Date >= %s)",
@@ -732,9 +655,9 @@ def _failure_r1(agent_name: str, run_date: date, run_type: str,
 
 
 # ── Main entry point ──────────────────────────────────────────────────────────
-def run_ambetter(dry_run: bool = False, agent_index: int | None = None) -> dict:
+def run_ambetter(dry_run: bool = False, agent_filter: int | None = None) -> dict:
     """
-    Called by main.py in Phase 8.
+    Public API. Called by launcher or standalone.
 
     Returns {'r1': [...], 'r2': [...]}
 
@@ -742,18 +665,21 @@ def run_ambetter(dry_run: bool = False, agent_index: int | None = None) -> dict:
         Written only if ALL agents succeed — same conservative rule as Molina.
         Any failure → state not updated → next run re-processes the same period.
     """
+    global log
+    log = setup_logging("AMBETTER")
+
     agents   = _load_agents()
     run_date = date.today()
-    run_type = "Monday" if run_date.weekday() == 0 else "Friday"
+    rt       = run_type()
     last_run = _get_last_run_date()
 
-    if agent_index is not None:
-        if agent_index >= len(agents):
+    if agent_filter is not None:
+        if agent_filter >= len(agents):
             raise IndexError(
-                f"--agent {agent_index} out of range — "
+                f"--agent {agent_filter} out of range — "
                 f"{len(agents)} agents loaded (0-based)"
             )
-        agents = [agents[agent_index]]
+        agents = [agents[agent_filter]]
         log.info("ambetter | single-agent mode: [%s]", agents[0]["name"])
 
     all_r1:    list[dict] = []
@@ -762,7 +688,7 @@ def run_ambetter(dry_run: bool = False, agent_index: int | None = None) -> dict:
     succeeded: list[str]  = []
 
     for agent in agents:
-        result = _run_single_agent(agent, run_date, run_type, last_run)
+        result = _run_single_agent(agent, run_date, rt, last_run)
         all_r1.append(result["r1"])
         all_r2.extend(result["r2"])
         (succeeded if result["success"] else failed).append(agent["name"])
@@ -789,73 +715,12 @@ def run_ambetter(dry_run: bool = False, agent_index: int | None = None) -> dict:
             len(failed),
         )
 
-    _write_summary_xlsx(all_r1, run_date)
-    _append_deactivated_xlsx(all_r2)
+    if not dry_run:
+        success_r1 = [r for r in all_r1 if r["status"] == "success"]
+        write_r1_xlsx(success_r1, "Ambetter", log)
+        append_deactivated_xlsx(all_r2, "Ambetter", log)
     return {"r1": all_r1, "r2": all_r2}
 
-
-# ── Standalone logging ────────────────────────────────────────────────────────
-def _setup_logging() -> None:
-    log_dir = ROOT / "logs"
-    log_dir.mkdir(exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d_%H%M")
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s | %(levelname)s | %(message)s",
-        handlers=[
-            logging.FileHandler(log_dir / f"run_{ts}.log", encoding="utf-8"),
-            logging.StreamHandler(sys.stdout),
-        ],
-    )
-
-def _write_summary_xlsx(r1_records: list[dict], run_date) -> None:
-    """
-    Write per-agent active member summary to data/output/ambetter_all_agents.xlsx.
-    Only includes successful records (status == 'success').
-    Mirrors the output format of molina_all_agents.xlsx and oscar_all_agents.xlsx.
-    """
-    import openpyxl
-    from openpyxl.styles import Font
-
-    rows = [
-        {"Agent": r["agent_name"], "Active Members": r["active_members"]}
-        for r in r1_records
-        if r["status"] == "success"
-    ]
-    if not rows:
-        log.warning("ambetter | no successful R1 records — skipping XLSX write")
-        return
-
-    new_df = (
-        pd.DataFrame(rows)
-        .sort_values("Active Members", ascending=False)
-        .reset_index(drop=True)
-    )
-
-    output_dir = ROOT / "data" / "output"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / "ambetter_all_agents.xlsx"
-
-    if output_path.exists():
-        existing_df = pd.read_excel(output_path, engine="openpyxl")
-        agent_names = new_df["Agent"].unique().tolist()
-        existing_df = existing_df[~existing_df["Agent"].isin(agent_names)]
-        df = pd.concat([existing_df, new_df], ignore_index=True)
-    else:
-        df = new_df
-
-    df = df.sort_values("Active Members", ascending=False).reset_index(drop=True)
-
-    with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="Ambetter Active Members")
-        ws = writer.sheets["Ambetter Active Members"]
-        ws.column_dimensions["A"].width = 30
-        ws.column_dimensions["B"].width = 18
-
-    log.info(
-        "ambetter | summary saved -> %s (%d agents, %d total active)",
-        output_path, len(df), df["Active Members"].sum(),
-    )
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
@@ -868,14 +733,13 @@ if __name__ == "__main__":
                         help="Load login page, save page source for selector diagnosis, then exit")
     args = parser.parse_args()
 
-    _setup_logging()
-
     if args.debug_selectors:
+        log = setup_logging("AMBETTER")
         agents = _load_agents()
         _debug_selectors(agents[0])   # any agent creds work — just needs the login page
         sys.exit(0)
 
-    result = run_ambetter(dry_run=args.dry_run, agent_index=args.agent)
+    result = run_ambetter(dry_run=args.dry_run, agent_filter=args.agent)
 
     print("\n-- R1  Active Members --------------------------------------------------")
     for r in result["r1"]:

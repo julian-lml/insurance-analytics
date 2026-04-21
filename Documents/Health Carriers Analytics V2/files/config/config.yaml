@@ -9,6 +9,12 @@ selenium:
   element_timeout: 15
   download_timeout: 120
 
+# R2 cutoff. Fixed historical date so portal lag does not silently drop
+# late-arriving cancellations. Dedup key in utils.append_deactivated_xlsx
+# keeps re-capture safe. See scripts/utils.get_r2_start_date.
+r2:
+  start_date: "2025-12-01"
+
 carriers:
 
   molina:
@@ -107,8 +113,19 @@ carriers:
 
   united:
     portal_url: "https://www.uhcjarvis.com/content/jarvis/en/sign_in.html#/sign_in"
-    selectors: {}
-    columns: {}
+
+    selectors:
+      # R1 — active member count label on the Jarvis Book of Business dashboard.
+      active_count: "p#activemembercount"
+
+    columns:
+      termination_date: "policyTermDate"     # YYYY-MM-DD or M/D/YYYY — parsed with errors="coerce"
+      first_name:       "memberFirstName"
+      last_name:        "memberLastName"
+      state:            "memberState"
+      member_dob:       "dateOfBirth"         # Available — format MM/DD/YYYY
+      policy_status:    "planStatus"          # 'A' = Active, 'I' = Inactive/Terminated
+      # policy_number: ⚠ no subscriber ID column confirmed — composite key (§8.20)
 
   oscar:
     portal_url: "https://accounts.hioscar.com/account/login/"

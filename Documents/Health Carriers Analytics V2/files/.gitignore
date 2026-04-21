@@ -17,6 +17,7 @@ venv/
 data/raw/
 data/output/
 data/state/
+data/chrome_profiles/
 
 # Logs
 logs/

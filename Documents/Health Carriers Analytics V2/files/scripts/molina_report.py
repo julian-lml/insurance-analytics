@@ -1,13 +1,13 @@
 """
-molina_report.py — v2.1
+molina_report.py — v2.2
+
+Changes in v2.2 (Phase R):
+  - R2 cutoff now sourced from scripts.utils.get_r2_start_date()
+    (fixed historical date in config/config.yaml, see CLAUDE.md §6, §8.23).
 
 Changes from v2.0:
   - R2 now returns member_first_name, member_last_name, dob, state
     instead of a combined member_name string.
-  - calculate_period_start() replaces the "dump all history on first run"
-    fallback. If no state file exists, it calculates the previous scheduled
-    run date from the calendar (Mon run → previous Friday; Fri run → previous
-    Monday). This means R2 is always scoped to "this period" from day one.
 
 Column map (all confirmed from actual CSV):
   Status / End_Date / Subscriber_ID / dob / State
@@ -16,10 +16,13 @@ Column map (all confirmed from actual CSV):
 import sys
 import logging
 from pathlib import Path
-from datetime import date, timedelta
+from datetime import date
 
 import pandas as pd
 import yaml
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from scripts.utils import get_r2_start_date
 
 # ─── Config ───────────────────────────────────────────────────────────────────
 _CONFIG_PATH = Path(__file__).parent.parent / "config" / "config.yaml"
@@ -32,16 +35,6 @@ ACTIVE_STATUSES = _MCFG["active_statuses"]
 TERMINATED_STATUS = _MCFG["terminated_status"]
 
 logger = logging.getLogger(__name__)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Period start calculation
-# ─────────────────────────────────────────────────────────────────────────────
-
-def calculate_period_start(today: date = None) -> date:
-    if today is None:
-        today = date.today()
-    return today.replace(day=1) - timedelta(days=1)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -160,9 +153,8 @@ def _build_r2_records(
       coverage_end_date, member_id, last_status, detection_method,
       run_date, carrier
 
-    period_start is always a real date — either from the state file
-    (subsequent runs) or from calculate_period_start() (first run).
-    There is no "dump all history" fallback anymore.
+    period_start is a fixed historical date from config/config.yaml
+    (see scripts.utils.get_r2_start_date and CLAUDE.md §6, §8.23).
     """
     term_df = df[df[COL["status"]] == TERMINATED_STATUS].copy()
 
@@ -247,9 +239,9 @@ def process_csv(
         csv_path:       Path to the downloaded Molina CSV.
         run_date:       ISO date of this run (YYYY-MM-DD).
         run_type:       "Monday" or "Friday".
-        last_run_date:  ISO date from state file. None on first run.
-                        If None, calculate_period_start() derives the cutoff
-                        from the calendar — R2 is always period-scoped.
+        last_run_date:  Accepted for backwards-compat; unused since Phase R.
+                        R2 cutoff is a fixed date from config/config.yaml
+                        (see scripts.utils.get_r2_start_date).
         write_xlsx:     Write agent XLSX. False in --dry-run mode.
 
     Returns:
@@ -261,17 +253,8 @@ def process_csv(
     status_dist = df[COL["status"]].value_counts().to_dict()
     logger.info(f"Loaded {len(df):,} rows. Status distribution: {status_dist}")
 
-    # Resolve period start — state file wins, calendar fallback on first run
-    if last_run_date is None:
-        logger.warning(
-            "First run — no state file. "
-            "R2 skipped. Baseline established for next run."
-        )
-        r1 = _build_r1_records(df, run_date, run_type)
-        return r1, []
-
-    period_start = calculate_period_start()
-    logger.info(f"Period start from calendar: {period_start}")
+    period_start = get_r2_start_date().isoformat()
+    logger.info(f"R2 start date (fixed from config): {period_start}")
 
     r1 = _build_r1_records(df, run_date, run_type)
     r2 = _build_r2_records(df, run_date, period_start)
@@ -301,10 +284,11 @@ if __name__ == "__main__":
     csv_path = Path(sys.argv[1])
     last_run = sys.argv[2] if len(sys.argv) > 2 else None
     today    = date.today().isoformat()
-    run_type = "Monday" if date.today().weekday() == 0 else "Friday"
+    from scripts.utils import run_type as _rt
+    rt = _rt()
 
     r1_records, r2_records = process_csv(
-        csv_path, today, run_type, last_run_date=last_run
+        csv_path, today, rt, last_run_date=last_run
     )
 
     print("\n" + "=" * 65)

@@ -17,7 +17,7 @@ Auth: user+pass then MS Authenticator MFA on boss's phone — SEMI-AUTO.
       Auth failures do NOT retry (CLAUDE.md §7).
 
 R1: sum of Lives column where Policy status != "inactive"
-R2: Inactive rows where Coverage end date >= calculate_period_start()
+R2: Inactive rows where Coverage end date >= get_r2_start_date()
     detection_method = "file_extract"
     policy_number field = Member ID (Oscar has no policy number)
 
@@ -31,7 +31,7 @@ import asyncio
 import logging
 import sys
 import time
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -41,60 +41,43 @@ from dotenv import load_dotenv
 load_dotenv()
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 
-# ─── Logging ──────────────────────────────────────────────────────────────────
-
-def _setup_logging() -> None:
-    log_dir = ROOT / "logs"
-    log_dir.mkdir(exist_ok=True)
-    from datetime import datetime
-    log_file = log_dir / f"run_{datetime.now().strftime('%Y%m%d_%H%M')}.log"
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s | oscar | %(levelname)s | %(message)s",
-        handlers=[
-            logging.FileHandler(log_file, encoding="utf-8"),
-            logging.StreamHandler(sys.stdout),
-        ],
-    )
+from scripts.utils import (
+    setup_logging,
+    run_type,
+    get_r2_start_date,
+    write_r1_xlsx,
+    append_deactivated_xlsx,
+)
 
 log = logging.getLogger(__name__)
 
-# ─── Column names — must match config/config.yaml carriers.oscar.columns ──────
+# ─── Column names — pulled from config/config.yaml carriers.oscar.columns ─────
 
-COL_LIVES  = "Lives"
-COL_STATUS = "Policy status"
-COL_NAME   = "Member name"
-COL_ID     = "Member ID"
-COL_DOB    = "Date of birth"
-COL_STATE  = "State"
-COL_END    = "Coverage end date"
+_CFG_PATH = ROOT / "config" / "config.yaml"
+with open(_CFG_PATH, encoding="utf-8") as _f:
+    _CFG = yaml.safe_load(_f)
+_COLS      = _CFG["carriers"]["oscar"]["columns"]
+COL_LIVES  = _COLS["lives"]
+COL_STATUS = _COLS["policy_status"]
+COL_NAME   = _COLS["member_name"]
+COL_ID     = _COLS["member_id"]
+COL_DOB    = _COLS["date_of_birth"]
+COL_STATE  = _COLS["state"]
+COL_END    = _COLS["coverage_end"]
 
 # ─── Selectors ────────────────────────────────────────────────────────────────
 
-PORTAL_URL       = "https://accounts.hioscar.com/account/login/"
-SEL_EMAIL        = "input[name='email']"
-SEL_PASSWORD     = "input[name='password']"
-SEL_SUBMIT       = "button[type='submit'].o-loginButton"
-SEL_APP_LINK = "text=Oscar For Business"
-SEL_INDIV_BOOK   = "text=Individual book"
-SEL_EXPORT_CSV   = "button:has-text('Export CSV')"
-
-# ─── Date scoping — verbatim from CLAUDE.md §6 ───────────────────────────────
-
-def calculate_period_start(today: date = None) -> date:
-    if today is None:
-        today = date.today()
-    return today.replace(day=1) - timedelta(days=1)
-
-
-def _run_type() -> str:
-    weekday = date.today().weekday()
-    if weekday == 0:
-        return "Monday"
-    elif weekday == 4:
-        return "Friday"
-    return "Manual"
+_OSCAR      = _CFG["carriers"]["oscar"]
+_OSEL       = _OSCAR["selectors"]
+PORTAL_URL       = _OSCAR["portal_url"]
+SEL_EMAIL        = _OSEL["email"]
+SEL_PASSWORD     = _OSEL["password"]
+SEL_SUBMIT       = _OSEL["submit"]
+SEL_APP_LINK     = "text=Oscar For Business"
+SEL_INDIV_BOOK   = _OSEL["individual_book"]
+SEL_EXPORT_CSV   = _OSEL["export_csv"]
 
 
 # ─── Config / agents ──────────────────────────────────────────────────────────
@@ -141,7 +124,7 @@ def _build_r2_records(
     run_date: str,
 ) -> list[dict]:
     """R2 schema — CLAUDE.md §5. Inactive rows within current period window."""
-    period_start = calculate_period_start()
+    period_start = get_r2_start_date()
 
     inactive_df = df[df[COL_STATUS].str.strip().str.lower() == "inactive"].copy()
 
@@ -209,68 +192,6 @@ def _process_csv(
     r1 = _build_r1_record(df, agent_name, run_date, run_type, duration)
     r2 = _build_r2_records(df, agent_name, run_date)
     return r1, r2
-
-
-# ─── XLSX append ──────────────────────────────────────────────────────────────
-
-def _append_deactivated_xlsx(r2_records: list[dict]) -> None:
-    """
-    Append R2 records to shared deactivated_members.xlsx.
-    Creates file if absent. Never overwrites existing rows.
-    """
-    if not r2_records:
-        return
-
-    output_path = ROOT / "data" / "output" / "deactivated_members.xlsx"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    new_df = pd.DataFrame(r2_records)
-    cols = [
-        "run_date", "carrier", "agent_name", "member_name",
-        "member_dob", "state", "coverage_end_date", "policy_number",
-    ]
-    cols = [c for c in cols if c in new_df.columns]
-    new_df = new_df[cols]
-
-    if output_path.exists():
-        existing_df = pd.read_excel(output_path, engine="openpyxl")
-        combined_df = pd.concat([existing_df, new_df], ignore_index=True)
-    else:
-        combined_df = new_df
-
-    combined_df = combined_df.drop_duplicates(
-        subset=["carrier", "policy_number", "coverage_end_date"],
-        keep="first",
-    )
-
-    try:
-        with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
-            combined_df.to_excel(writer, index=False, sheet_name="Deactivated Members")
-    except Exception as exc:
-        log.warning(f"[Oscar] XLSX write failed — {exc}. Continuing.")
-
-
-# ─── R1 XLSX writer ───────────────────────────────────────────────────────────
-
-def _write_oscar_xlsx(r1_records: list[dict]) -> None:
-    """Write R1 records to data/output/oscar_all_agents.xlsx (overwrite each run)."""
-    if not r1_records:
-        return
-
-    output_path = ROOT / "data" / "output" / "oscar_all_agents.xlsx"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    cols = ["agent_name", "active_members", "run_date", "run_type", "status"]
-    df = pd.DataFrame(r1_records)
-    df = df[[c for c in cols if c in df.columns]]
-    df = df.sort_values("active_members", ascending=False)
-
-    try:
-        with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
-            df.to_excel(writer, index=False, sheet_name="Active Members")
-        log.info(f"[Oscar] XLSX written → {output_path} ({len(df)} agents)")
-    except Exception as exc:
-        log.warning(f"[Oscar] oscar_all_agents.xlsx write failed — {exc}. Continuing.")
 
 
 # ─── Modal dismissal ──────────────────────────────────────────────────────────
@@ -412,7 +333,7 @@ async def _run_single_agent(
 
     log.info(
         f"[Oscar] {agent_name}: R1 active_members={r1['active_members']} "
-        f"R2 records={len(r2)} period_start={calculate_period_start()}"
+        f"R2 records={len(r2)} period_start={get_r2_start_date()}"
     )
     return r1, r2
 
@@ -443,8 +364,9 @@ async def _run_all_agents_async(
             )
 
     if not dry_run:
-        _append_deactivated_xlsx(all_r2)
-        _write_oscar_xlsx(all_r1)
+        success_r1 = [r for r in all_r1 if r["status"] == "success"]
+        write_r1_xlsx(success_r1, "Oscar", log)
+        append_deactivated_xlsx(all_r2, "Oscar", log)
         log.info(
             f"[Oscar] Run complete — "
             f"{sum(1 for r in all_r1 if r['status'] == 'success')}/{len(all_r1)} agents succeeded, "
@@ -464,7 +386,7 @@ def _print_dry_run_summary(r1_records: list[dict], r2_records: list[dict]) -> No
         print(f"  {status} {r['agent_name']:25s}  active={r['active_members']}")
     print(f"\n  R2 records this period: {len(r2_records)}")
     if r2_records:
-        period_start = calculate_period_start()
+        period_start = get_r2_start_date()
         print(f"  Period start: {period_start}")
         for rec in r2_records:
             print(
@@ -472,22 +394,39 @@ def _print_dry_run_summary(r1_records: list[dict], r2_records: list[dict]) -> No
                 f"end={rec['coverage_end_date']}"
             )
     else:
-        print(f"  (0 R2 records for period starting {calculate_period_start()})")
+        print(f"  (0 R2 records for period starting {get_r2_start_date()})")
     print("─────────────────────────────────────────────────────────\n")
 
 
 # ─── Public sync wrapper ──────────────────────────────────────────────────────
 
-def run_oscar(dry_run: bool = False) -> tuple[list[dict], list[dict]]:
+def run_oscar(
+    dry_run: bool = False,
+    agent_filter: int | None = None,
+    headless: bool = False,
+) -> tuple[list[dict], list[dict]]:
     """
-    Sync wrapper — called by main.py in Phase 8.
+    Public API. Called by launcher or standalone.
     Returns (r1_records, r2_records).
     """
+    global log
+    log = setup_logging("OSCAR")
+
     agents   = _load_agents()
     run_date = date.today().isoformat()
-    run_type = _run_type()
+    rt       = run_type()
+
+    if agent_filter is not None:
+        if agent_filter >= len(agents):
+            raise IndexError(
+                f"--agent {agent_filter} out of range "
+                f"(0–{len(agents) - 1} available)"
+            )
+        agents = [agents[agent_filter]]
+        log.info(f"[Oscar] Single-agent mode: {agents[0]['name']}")
+
     return asyncio.run(
-        _run_all_agents_async(agents, dry_run, run_date, run_type, headless=False)
+        _run_all_agents_async(agents, dry_run, run_date, rt, headless)
     )
 
 
@@ -495,52 +434,20 @@ def run_oscar(dry_run: bool = False) -> tuple[list[dict], list[dict]]:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Phase 4 — Oscar Playwright bot",
+        description="Oscar Playwright bot",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "examples:\n"
             "  python scripts/oscar_bot.py\n"
-            "    → all agents, full browser + CSV, writes XLSX\n\n"
             "  python scripts/oscar_bot.py --dry-run\n"
-            "    → all agents, full browser + CSV, no XLSX write\n\n"
             "  python scripts/oscar_bot.py --agent 0\n"
-            "    → single agent, writes XLSX\n\n"
             "  python scripts/oscar_bot.py --agent 0 --dry-run\n"
-            "    → single agent, no XLSX write\n\n"
             "  python scripts/oscar_bot.py --headless --dry-run\n"
-            "    → all agents headless (MFA prompt still appears in terminal)\n"
         ),
     )
-    parser.add_argument(
-        "--agent", type=int, default=None,
-        help="Run only agent at index N (0-based) from agents.yaml oscar: key",
-    )
-    parser.add_argument(
-        "--dry-run", action="store_true",
-        help="Full browser + CSV flow; no XLSX write, no state update",
-    )
-    parser.add_argument(
-        "--headless", action="store_true",
-        help="Run browser headless (default: headed so you can see MFA prompt)",
-    )
+    parser.add_argument("--agent", type=int, default=None)
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--headless", action="store_true")
     args = parser.parse_args()
 
-    _setup_logging()
-
-    agents   = _load_agents()
-    run_date = date.today().isoformat()
-    run_type = _run_type()
-
-    if args.agent is not None:
-        if args.agent >= len(agents):
-            print(
-                f"Error: --agent {args.agent} out of range "
-                f"(0–{len(agents) - 1} available)"
-            )
-            sys.exit(1)
-        agents = [agents[args.agent]]
-        log.info(f"[Oscar] Single-agent mode: {agents[0]['name']}")
-
-    asyncio.run(
-        _run_all_agents_async(agents, args.dry_run, run_date, run_type, args.headless)
-    )
+    run_oscar(dry_run=args.dry_run, agent_filter=args.agent, headless=args.headless)

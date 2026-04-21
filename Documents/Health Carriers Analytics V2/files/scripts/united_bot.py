@@ -2,8 +2,9 @@
 scripts/united_bot.py — Phase 6
 UHC Jarvis: Playwright browser automation — R1 (active members) + R2 (deactivated).
 
-Public API (called by main.py in Phase 8):
-    run_united(dry_run=False) -> (list[dict], list[dict])   # (r1_records, r2_records)
+Public API (called by launcher):
+    run_united(dry_run=False, agent_filter=None, headless=False)
+        → (list[dict], list[dict])   # (r1_records, r2_records)
 
 Standalone usage:
     python scripts/united_bot.py                    # all agents, writes XLSX
@@ -12,17 +13,15 @@ Standalone usage:
     python scripts/united_bot.py --agent 0 --dry-run
     python scripts/united_bot.py --headless --dry-run
 
-Auth: user+pass then MS Authenticator MFA on boss's phone — SEMI-AUTO.
-      Human must press ENTER after each agent's MFA approval.
+Auth: fully manual login — bot opens the sign-in page, human logs in + approves MFA.
       Auth failures do NOT retry (CLAUDE.md §7).
 
 R1: Dashboard count — semi-auto: human navigates to Book of Business,
-    bot reads active count label. Falls back to manual entry if selector fails.
+    bot reads active count label (selector from config/config.yaml).
 
-R2: file_extract — bot clicks Export, downloads XLSX, filters in pandas:
-      Policy Status == "Terminated" AND Termination Date >= calculate_period_start()
-    Termination Date stored as M/D/YYYY strings (CLAUDE.md §9).
-    member_dob = null always — not available in United export (CLAUDE.md §8.17).
+R2: file_extract — human triggers Export in browser, bot captures download, filters:
+      planStatus == "I" AND policyTermDate >= get_r2_start_date()
+    member_dob from dateOfBirth column.
     detection_method = "file_extract"
 
 No state file for United (CLAUDE.md §10 / §8.17).
@@ -37,7 +36,7 @@ import logging
 import re
 import sys
 import time
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -48,69 +47,37 @@ from playwright.async_api import TimeoutError as PWTimeout
 load_dotenv()
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 
-# ─── Logging ──────────────────────────────────────────────────────────────────
-
-def _setup_logging() -> None:
-    log_dir = ROOT / "logs"
-    log_dir.mkdir(exist_ok=True)
-    from datetime import datetime
-    log_file = log_dir / f"run_{datetime.now().strftime('%Y%m%d_%H%M')}.log"
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s | united | %(levelname)s | %(message)s",
-        handlers=[
-            logging.FileHandler(log_file, encoding="utf-8"),
-            logging.StreamHandler(sys.stdout),
-        ],
-    )
+from scripts.utils import (
+    setup_logging,
+    run_type,
+    get_r2_start_date,
+    write_r1_xlsx,
+    append_deactivated_xlsx,
+)
 
 log = logging.getLogger(__name__)
 
-# ─── Column constants — confirmed from live Jarvis BookOfBusiness DownloadResults.xlsx ──
-# NOTE: these are camelCase, different from the original sample file (CLAUDE.md §8.17).
-# No subscriber/policy ID column confirmed in this download — policy_number is a
-# temporary name-based composite key until confirmed (see _build_r2_records).
+# ─── Column names — pulled from config/config.yaml carriers.united.columns ────
 
-COL_TERM_DATE     = "policyTermDate"   # M/D/YYYY or YYYY-MM-DD — parse with errors="coerce"
-COL_FIRST_NAME    = "memberFirstName"
-COL_LAST_NAME     = "memberLastName"
-COL_STATE         = "memberState"
-COL_DOB           = "dateOfBirth"      # IS available in this export (not null)
-COL_POLICY_STATUS = "planStatus"       # "Active" confirmed; terminated value TBD after first run
+_CFG_PATH = ROOT / "config" / "config.yaml"
+with open(_CFG_PATH, encoding="utf-8") as _f:
+    _CFG = yaml.safe_load(_f)
 
-SIGN_IN_URL      = "https://www.uhcjarvis.com/content/jarvis/en/sign_in.html#/sign_in"
+_UNITED           = _CFG["carriers"]["united"]
+_COLS             = _UNITED["columns"]
+COL_TERM_DATE     = _COLS["termination_date"]
+COL_FIRST_NAME    = _COLS["first_name"]
+COL_LAST_NAME     = _COLS["last_name"]
+COL_STATE         = _COLS["state"]
+COL_DOB           = _COLS["member_dob"]
+COL_POLICY_STATUS = _COLS["policy_status"]
 
-# R1 — active count label on the Jarvis Book of Business dashboard.
-# Confirmed from live portal HTML inspection.
-SEL_ACTIVE_COUNT = "p#activemembercount"
+# ─── Selectors ────────────────────────────────────────────────────────────────
 
-# ─── Date scoping — verbatim from CLAUDE.md §6 ───────────────────────────────
-
-def calculate_period_start(today: date = None) -> date:
-    """
-    Returns the last day of the previous month.
-
-    Rationale: Molina and Oscar stamp all terminations at end-of-month.
-    Anchoring to last day of previous month captures everything correctly.
-    United uses real termination dates (M/D/YYYY) — the wider window does not
-    cause duplicates because dedup key (carrier, policy_number, coverage_end_date)
-    handles re-capture across consecutive runs. See CLAUDE.md §6.
-    """
-    if today is None:
-        today = date.today()
-    first_of_this_month = today.replace(day=1)
-    last_of_prev_month = first_of_this_month - timedelta(days=1)
-    return last_of_prev_month
-
-
-def _run_type() -> str:
-    weekday = date.today().weekday()
-    if weekday == 0:
-        return "Monday"
-    elif weekday == 4:
-        return "Friday"
-    return "Manual"
+SIGN_IN_URL      = _UNITED["portal_url"]
+SEL_ACTIVE_COUNT = _UNITED["selectors"]["active_count"]
 
 
 # ─── Config / agents ──────────────────────────────────────────────────────────
@@ -175,26 +142,18 @@ def _build_r2_records(
 ) -> list[dict]:
     """
     R2 schema — CLAUDE.md §5.
-    Filter: planStatus != "Active" AND policyTermDate >= period_start.
-
-    policyTermDate may be M/D/YYYY or YYYY-MM-DD — parsed with errors="coerce".
-    member_dob available via dateOfBirth column (confirmed in live export).
-    detection_method = "file_extract".
+    Filter: planStatus == "I" AND policyTermDate >= get_r2_start_date().
 
     policy_number: no subscriber ID column confirmed in this download.
-    Temporary composite key: memberFirstName_memberLastName.
-    WARNING is logged. Replace once policy ID column is confirmed.
+    Temporary composite key: memberFirstName_memberLastName (§8.20).
     """
-    period_start = calculate_period_start()
+    period_start = get_r2_start_date()
 
     df = df.copy()
 
-    # Filter to inactive rows only — planStatus == "I" confirmed from live file
     if COL_POLICY_STATUS in df.columns:
         df = df[df[COL_POLICY_STATUS].str.strip() == "I"]
 
-    # Parse policyTermDate — YYYY-MM-DD confirmed from live file; errors="coerce"
-    # handles any format variation without crashing
     df[COL_TERM_DATE] = pd.to_datetime(df[COL_TERM_DATE], errors="coerce")
     df = df.dropna(subset=[COL_TERM_DATE])
     df = df[df[COL_TERM_DATE].dt.date >= period_start]
@@ -226,7 +185,7 @@ def _build_r2_records(
             "state":             str(row.get(COL_STATE, "") or "").strip(),
             "coverage_end_date": row[COL_TERM_DATE].strftime("%Y-%m-%d"),
             "policy_number":     f"{first}_{last}",   # temporary — no ID col confirmed
-            "last_status":       "Inactive",   # planStatus == 'I' — confirmed April 2026
+            "last_status":       "Inactive",
             "detection_method":  "file_extract",
         })
     return records
@@ -247,91 +206,12 @@ def _read_export(path: Path) -> pd.DataFrame:
     """
     for header_row in range(10):
         df = pd.read_excel(path, header=header_row, engine="openpyxl", dtype=str)
-        if "memberFirstName" in df.columns:
+        if COL_FIRST_NAME in df.columns:
             return df
     raise ValueError(
         f"Could not find expected headers in {path.name}. "
-        "Ensure 'memberFirstName' column is present in the download."
+        f"Ensure '{COL_FIRST_NAME}' column is present in the download."
     )
-
-
-# ─── XLSX append with dedup ───────────────────────────────────────────────────
-
-def _append_deactivated_xlsx(r2_records: list[dict]) -> None:
-    """
-    Append R2 records to shared deactivated_members.xlsx.
-    Dedup key: (carrier, policy_number, coverage_end_date).
-    Existing rows always win (keep="first"). CLAUDE.md §6.
-    """
-    if not r2_records:
-        return
-
-    output_path = ROOT / "data" / "output" / "deactivated_members.xlsx"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    new_df = pd.DataFrame(r2_records)
-    cols = [
-        "run_date", "carrier", "agent_name", "member_name",
-        "member_dob", "state", "coverage_end_date", "policy_number",
-        "last_status", "detection_method",
-    ]
-    new_df = new_df[[c for c in cols if c in new_df.columns]]
-
-    if output_path.exists():
-        existing_df = pd.read_excel(output_path, engine="openpyxl")
-        combined_df = pd.concat([existing_df, new_df], ignore_index=True)
-        rows_before = len(existing_df)
-    else:
-        combined_df = new_df
-        rows_before = 0
-
-    combined_df = combined_df.drop_duplicates(
-        subset=["carrier", "policy_number", "coverage_end_date"],
-        keep="first",
-    )
-    net_new = len(combined_df) - rows_before
-
-    try:
-        with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
-            combined_df.to_excel(writer, index=False, sheet_name="Deactivated Members")
-        log.info("[United] appended %d net-new R2 records to deactivated_members.xlsx", net_new)
-    except Exception as exc:
-        log.warning(f"[United] XLSX write failed — {exc}. Continuing.")
-
-
-# ─── R1 XLSX writer ───────────────────────────────────────────────────────────
-
-def _write_united_xlsx(r1_records: list[dict]) -> None:
-    """Write R1 records to data/output/united_all_agents.xlsx (overwrite each run)."""
-    if not r1_records:
-        return
-
-    output_path = ROOT / "data" / "output" / "united_all_agents.xlsx"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    cols = [
-        "run_date", "run_type", "carrier", "agent_name", "active_members",
-        "status", "error_message", "duration_seconds",
-    ]
-    new_df = pd.DataFrame(r1_records)
-    new_df = new_df[[c for c in cols if c in new_df.columns]]
-
-    if output_path.exists():
-        existing_df = pd.read_excel(output_path, engine="openpyxl")
-        agent_names = new_df["agent_name"].unique().tolist()
-        existing_df = existing_df[~existing_df["agent_name"].isin(agent_names)]
-        df = pd.concat([existing_df, new_df], ignore_index=True)
-    else:
-        df = new_df
-
-    df = df.sort_values("active_members", ascending=False)
-
-    try:
-        with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
-            df.to_excel(writer, index=False, sheet_name="Active Members")
-        log.info("[United] wrote united_all_agents.xlsx — %d agents", len(df))
-    except Exception as exc:
-        log.warning(f"[United] united_all_agents.xlsx write failed — {exc}. Continuing.")
 
 
 # ─── Single-agent Playwright flow ─────────────────────────────────────────────
@@ -361,7 +241,7 @@ async def _run_single_agent(
     )
     dl_dir.mkdir(parents=True, exist_ok=True)
 
-    period_start = calculate_period_start()
+    period_start = get_r2_start_date()
     export_path: Path | None = None
 
     page = await context.new_page()
@@ -372,8 +252,8 @@ async def _run_single_agent(
     await page.goto(SIGN_IN_URL, wait_until="domcontentloaded")
     print(f"\n[United] [{agent['name']}]")
     print(f"  1. Log in completely manually in the browser")
-    print(f"     Username: {agent['user']}")
-    print(f"     Password: {agent['pass']}")
+    print(f"     Account: {agent['user']}")
+    print(f"     (Use your password manager for the password)")
     print(f"  2. Approve Microsoft Authenticator when prompted")
     print(f"  3. When you reach the Jarvis dashboard, press ENTER here...")
     input()
@@ -389,9 +269,6 @@ async def _run_single_agent(
     log.info("[United] %s: dashboard loaded", agent_name)
 
     # ── R1: read active count from dashboard ─────────────────────────────
-    # UHC Jarvis shows active member count in p#activemembercount.
-    # Human navigates to the Book of Business dashboard; bot reads the label.
-
     print(f"\n[United -- {agent_name}] R1 COUNT -- do this in the browser:")
     print("  1. Navigate to Book of Business so the active member count is visible")
     print("  2. Press ENTER — bot will read the count automatically")
@@ -413,10 +290,6 @@ async def _run_single_agent(
     r1 = _build_r1_record(agent_name, active_members, run_date, run_type, duration_r1)
 
     # ── R2: wait for human-triggered download ────────────────────────────
-    # Bot registers the download listener first, then prints instructions.
-    # Human applies Terminated filter, clicks Download, selects columns,
-    # and clicks Download in the modal. The download event fires automatically.
-
     print(f"\n[United -- {agent_name}] R2 EXPORT -- do this in the browser:")
     print("  1. Navigate to the Book of Business export section")
     print(f"  2. Apply filter: Terminated, Termination Date on/after {period_start.strftime('%m/%d/%Y')}")
@@ -437,7 +310,6 @@ async def _run_single_agent(
 
     log.info("[United] %s: export rows=%d  columns=%s", agent_name, len(df), list(df.columns))
 
-    # Log Policy Status distribution to confirm filter worked
     if COL_POLICY_STATUS in df.columns:
         log.info(
             "[United] %s: Policy Status distribution: %s",
@@ -485,8 +357,6 @@ async def _run_all_agents_async(
         )
 
         async with async_playwright() as p:
-            # launch_persistent_context returns a BrowserContext directly (no
-            # separate Browser object). Pass it to _run_single_agent as `context`.
             context = await p.chromium.launch_persistent_context(
                 user_data_dir=agent_profile,
                 channel="chrome",
@@ -515,8 +385,9 @@ async def _run_all_agents_async(
     success_count = sum(1 for r in all_r1 if r["status"] == "success")
 
     if not dry_run:
-        _append_deactivated_xlsx(all_r2)
-        _write_united_xlsx(all_r1)
+        success_r1 = [r for r in all_r1 if r["status"] == "success"]
+        write_r1_xlsx(success_r1, "United", log)
+        append_deactivated_xlsx(all_r2, "United", log)
         # No state file for United (CLAUDE.md §10 / §8.17)
         log.info(
             "[United] Run complete -- %d/%d agents succeeded, %d R2 records written",
@@ -536,30 +407,47 @@ def _print_dry_run_summary(r1_records: list[dict], r2_records: list[dict]) -> No
         print(f"  {status} {r['agent_name']:25s}  active={r['active_members']}")
     print(f"\n  R2 records this period: {len(r2_records)}")
     if r2_records:
-        period_start = calculate_period_start()
-        print(f"  Period start: {period_start}  (member_dob always null for United)")
+        period_start = get_r2_start_date()
+        print(f"  Period start: {period_start}")
         for rec in r2_records:
             print(
                 f"    {rec['agent_name']:20s}  {rec['member_name']:25s}  "
                 f"end={rec['coverage_end_date']}  policy={rec['policy_number']}"
             )
     else:
-        print(f"  (0 R2 records for period starting {calculate_period_start()})")
+        print(f"  (0 R2 records for period starting {get_r2_start_date()})")
     print("--------------------------------------------------------\n")
 
 
 # ─── Public sync wrapper ──────────────────────────────────────────────────────
 
-def run_united(dry_run: bool = False) -> tuple[list[dict], list[dict]]:
+def run_united(
+    dry_run: bool = False,
+    agent_filter: int | None = None,
+    headless: bool = False,
+) -> tuple[list[dict], list[dict]]:
     """
-    Sync wrapper — called by main.py in Phase 8.
+    Public API. Called by launcher or standalone.
     Returns (r1_records, r2_records).
     """
+    global log
+    log = setup_logging("UNITED")
+
     agents   = _load_agents()
     run_date = date.today().isoformat()
-    run_type = _run_type()
+    rt       = run_type()
+
+    if agent_filter is not None:
+        if agent_filter >= len(agents):
+            raise IndexError(
+                f"--agent {agent_filter} out of range "
+                f"(0-{len(agents) - 1} available)"
+            )
+        agents = [agents[agent_filter]]
+        log.info(f"[United] Single-agent mode: {agents[0]['name']}")
+
     return asyncio.run(
-        _run_all_agents_async(agents, dry_run, run_date, run_type, headless=False)
+        _run_all_agents_async(agents, dry_run, run_date, rt, headless)
     )
 
 
@@ -567,58 +455,20 @@ def run_united(dry_run: bool = False) -> tuple[list[dict], list[dict]]:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Phase 6 -- United Healthcare Playwright bot",
+        description="United Healthcare Playwright bot",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "examples:\n"
             "  python scripts/united_bot.py\n"
-            "    -> all agents, full browser flow, writes XLSX\n\n"
             "  python scripts/united_bot.py --dry-run\n"
-            "    -> all agents, full browser flow, no XLSX write\n\n"
             "  python scripts/united_bot.py --agent 0\n"
-            "    -> single agent, writes XLSX\n\n"
             "  python scripts/united_bot.py --agent 0 --dry-run\n"
-            "    -> single agent, no writes\n\n"
             "  python scripts/united_bot.py --headless --dry-run\n"
-            "    -> headless browser (MFA prompt still appears in terminal)\n\n"
-            "FIRST RUN CHECKLIST:\n"
-            "  1. Add a 'united:' section to config/agents.yaml (name/user/pass per agent)\n"
-            "  2. Run --agent 0 --dry-run to test login + export flow\n"
-            "  3. Inspect the R2 export columns and confirm against CLAUDE.md §9\n"
-            "  4. Update SEL_ACTIVE_COUNT once you identify the correct CSS selector\n"
-            "  5. Update SEL_EXPORT_BTN if the portal's export button selector differs"
         ),
     )
-    parser.add_argument(
-        "--agent", type=int, default=None,
-        help="Run only agent at index N (0-based) from agents.yaml united: key",
-    )
-    parser.add_argument(
-        "--dry-run", action="store_true",
-        help="Full browser flow; no XLSX write",
-    )
-    parser.add_argument(
-        "--headless", action="store_true",
-        help="Run browser headless (default: headed so you can see the portal)",
-    )
+    parser.add_argument("--agent", type=int, default=None)
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--headless", action="store_true")
     args = parser.parse_args()
 
-    _setup_logging()
-
-    agents   = _load_agents()
-    run_date = date.today().isoformat()
-    run_type = _run_type()
-
-    if args.agent is not None:
-        if args.agent >= len(agents):
-            print(
-                f"Error: --agent {args.agent} out of range "
-                f"(0-{len(agents) - 1} available)"
-            )
-            sys.exit(1)
-        agents = [agents[args.agent]]
-        log.info(f"[United] Single-agent mode: {agents[0]['name']}")
-
-    asyncio.run(
-        _run_all_agents_async(agents, args.dry_run, run_date, run_type, args.headless)
-    )
+    run_united(dry_run=args.dry_run, agent_filter=args.agent, headless=args.headless)

@@ -1,26 +1,31 @@
 """
-scripts/sheets_writer.py — Phase 3
-Google Sheets writer: Summary pivot + Deactivated This Period + Active Members log.
+scripts/sheets_writer.py — Phase 3 (refactored Phase R)
+Google Sheets writer: reads carrier XLSX files from disk, pushes to Sheets.
 
-Public API (what main.py calls in Phase 8):
-    write_run(r1_records, r2_records, dry_run=False) → None
+Public API (called by launcher):
+    push_to_sheets(dry_run=False) → None
 
-Lower-level functions (also importable):
-    get_or_create_month_sheet(year, month) → sheet_id
-    write_summary(r1_records, sheet_id)   → None
-    append_deactivated(r2_records, sheet_id) → None
-    append_r1_log(r1_records, sheet_id)   → None
+Reads from:
+    data/output/{carrier}_all_agents.xlsx   (one per carrier — R1 current state)
+    data/output/deactivated_members.xlsx    (all carriers — R2 append-only)
+
+Writes to:
+    Google Sheet "{Month} {Year}"
+      ├── Summary (overwrite each push)
+      ├── Deactivated This Period (append net-new only, deduped)
+      └── Active Members (append — R1 audit trail)
+
+Bots never call this module. The launcher's "Push to Sheets" button invokes it
+only after the operator has verified all carrier XLSX files for the day.
 
 Env vars (.env):
-    GOOGLE_SERVICE_ACCOUNT_JSON  path to service account JSON (default: credentials/service_account.json)
-    DRIVE_FOLDER_ID              Google Drive folder that receives monthly sheets
-    SHEET_ID_{MONTH}_{YEAR}      pin an existing sheet ID and skip Drive file creation entirely
-                                 e.g. SHEET_ID_APRIL_2026=1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms
-                                 Use when Drive returns storageQuotaExceeded on file creation.
+    GOOGLE_SERVICE_ACCOUNT_JSON  service account JSON (default: credentials/service_account.json)
+    DRIVE_FOLDER_ID              Drive folder that receives monthly sheets
+    SHEET_ID_{MONTH}_{YEAR}      pin an existing sheet ID (e.g. SHEET_ID_APRIL_2026=…)
 
-Standalone test:
-    python scripts/sheets_writer.py
-    python scripts/sheets_writer.py --dry-run
+Standalone usage:
+    python scripts/sheets_writer.py             # push live
+    python scripts/sheets_writer.py --dry-run   # log what would be written, no API writes
 """
 
 from __future__ import annotations
@@ -29,7 +34,7 @@ import argparse
 import logging
 import os
 import sys
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -40,22 +45,9 @@ from googleapiclient.discovery import build
 load_dotenv()
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 
-# ─── Logging ──────────────────────────────────────────────────────────────────
-
-def setup_logging() -> None:
-    log_dir = ROOT / "logs"
-    log_dir.mkdir(exist_ok=True)
-    log_file = log_dir / f"run_{datetime.now().strftime('%Y%m%d_%H%M')}.log"
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s | sheets | %(levelname)s | %(message)s",
-        handlers=[
-            logging.FileHandler(log_file, encoding="utf-8"),
-            logging.StreamHandler(sys.stdout),
-        ],
-    )
-
+from scripts.utils import setup_logging
 
 log = logging.getLogger(__name__)
 
@@ -66,7 +58,6 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive",
 ]
 
-# Canonical carrier column order — matches CLAUDE.md deliverable shape
 CARRIER_ORDER = ["Ambetter", "Cigna", "Molina", "Oscar", "United"]
 
 TAB_SUMMARY     = "Summary"
@@ -84,6 +75,41 @@ R2_HEADERS = [
     "run_date", "carrier", "agent_name", "member_name",
     "member_dob", "state", "coverage_end_date", "policy_number",
 ]
+
+OUTPUT_DIR = ROOT / "data" / "output"
+R2_XLSX    = OUTPUT_DIR / "deactivated_members.xlsx"
+
+
+# ─── XLSX readers ─────────────────────────────────────────────────────────────
+
+def _read_r1_from_disk() -> list[dict]:
+    """
+    Load R1 records from every {carrier}_all_agents.xlsx file in data/output/.
+    Missing files are skipped (logged, not fatal). Returns records as list of dicts.
+    """
+    records: list[dict] = []
+    for carrier in CARRIER_ORDER:
+        path = OUTPUT_DIR / f"{carrier.lower()}_all_agents.xlsx"
+        if not path.exists():
+            log.warning("R1 XLSX missing — skipping %s (%s)", carrier, path.name)
+            continue
+        df = pd.read_excel(path, engine="openpyxl")
+        log.info("R1 loaded: %s — %d rows", carrier, len(df))
+        records.extend(df.to_dict(orient="records"))
+    return records
+
+
+def _read_r2_from_disk() -> list[dict]:
+    """
+    Load every row from data/output/deactivated_members.xlsx.
+    Dedup against Sheets happens inside append_deactivated().
+    """
+    if not R2_XLSX.exists():
+        log.warning("R2 XLSX missing — %s (no R2 push this run)", R2_XLSX.name)
+        return []
+    df = pd.read_excel(R2_XLSX, engine="openpyxl")
+    log.info("R2 loaded: %d rows from %s", len(df), R2_XLSX.name)
+    return df.to_dict(orient="records")
 
 
 # ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -146,7 +172,6 @@ def _create_month_sheet(sheets, drive, folder_id: str, name: str) -> str:
     sheet_id = file["id"]
     log.info(f"Created new sheet '{name}' (id={sheet_id})")
 
-    # Get the auto-created Sheet1's numeric sheetId so we can rename it
     meta = sheets.spreadsheets().get(spreadsheetId=sheet_id).execute()
     default_gid = meta["sheets"][0]["properties"]["sheetId"]
 
@@ -166,24 +191,14 @@ def _create_month_sheet(sheets, drive, folder_id: str, name: str) -> str:
         },
     ).execute()
 
-    # Write header rows to all three tabs
     sheets.spreadsheets().values().batchUpdate(
         spreadsheetId=sheet_id,
         body={
             "valueInputOption": "RAW",
             "data": [
-                {
-                    "range": f"'{TAB_SUMMARY}'!A1",
-                    "values": [SUMMARY_HEADERS],
-                },
-                {
-                    "range": f"'{TAB_DEACTIVATED}'!A1",
-                    "values": [R2_HEADERS],
-                },
-                {
-                    "range": f"'{TAB_ACTIVE_LOG}'!A1",
-                    "values": [R1_LOG_HEADERS],
-                },
+                {"range": f"'{TAB_SUMMARY}'!A1",     "values": [SUMMARY_HEADERS]},
+                {"range": f"'{TAB_DEACTIVATED}'!A1", "values": [R2_HEADERS]},
+                {"range": f"'{TAB_ACTIVE_LOG}'!A1",  "values": [R1_LOG_HEADERS]},
             ],
         },
     ).execute()
@@ -236,15 +251,12 @@ def get_or_create_month_sheet(year: int, month: int) -> str:
     Return the Sheets file ID for the given year/month.
 
     Resolution order:
-      1. Env var SHEET_ID_{MONTH}_{YEAR} (e.g. SHEET_ID_APRIL_2026) — skips Drive entirely.
-         Use this when Drive file creation is blocked (storageQuotaExceeded abuse prevention).
+      1. Env var SHEET_ID_{MONTH}_{YEAR} — skips Drive entirely.
       2. Drive folder search — finds existing sheet by name.
       3. Drive file create — creates sheet with 3 tabs + headers.
-
-    Idempotent — safe to call multiple times per run.
     """
-    month_name = date(year, month, 1).strftime("%B").upper()  # e.g. "APRIL"
-    env_key = f"SHEET_ID_{month_name}_{year}"                 # e.g. "SHEET_ID_APRIL_2026"
+    month_name = date(year, month, 1).strftime("%B").upper()
+    env_key = f"SHEET_ID_{month_name}_{year}"
     pinned_id = os.getenv(env_key, "").strip()
     if pinned_id:
         log.info(f"Using pinned sheet ID from env {env_key}={pinned_id}")
@@ -297,22 +309,17 @@ def _build_pivot_rows(r1_records: list[dict]) -> list[list]:
         aggfunc="sum",
     )
 
-    # Ensure all carriers present as columns in canonical order;
-    # carriers with no data stay as NaN (→ blank cell)
     pivot = pivot.reindex(columns=CARRIER_ORDER)
-    pivot = pivot.sort_index()          # agents alphabetical
+    pivot = pivot.sort_index()
     pivot.index.name  = None
     pivot.columns.name = None
 
-    # Total column per agent — sum non-NaN only (min_count=1 keeps NaN if all blank)
     pivot["Total"] = pivot.sum(axis=1, min_count=1)
 
-    # Total row — sum per carrier across all agents
     total_row = pivot.sum(axis=0, min_count=1)
     total_row.name = "Total"
     pivot = pd.concat([pivot, total_row.to_frame().T])
 
-    # Serialise: NaN → "", numbers → int
     rows = [SUMMARY_HEADERS]
     for agent_name, row in pivot.iterrows():
         out_row = [agent_name]
@@ -329,11 +336,10 @@ def _build_pivot_rows(r1_records: list[dict]) -> list[list]:
 def write_summary(r1_records: list[dict], sheet_id: str) -> None:
     """
     Completely overwrites the Summary tab with the current pivot.
-    Called every run — Summary is never appended, always rebuilt.
+    Called every push — Summary is never appended, always rebuilt.
     """
     sheets, _ = _get_services()
 
-    # Clear the entire tab first (rows may shrink between runs)
     sheets.spreadsheets().values().clear(
         spreadsheetId=sheet_id,
         range=f"'{TAB_SUMMARY}'!A:Z",
@@ -347,7 +353,6 @@ def write_summary(r1_records: list[dict], sheet_id: str) -> None:
         body={"values": rows},
     ).execute()
 
-    # -1 for header, -1 for Total row = agent data rows
     agent_rows = max(0, len(rows) - 2)
     log.info(
         f"write_summary: {agent_rows} agents, "
@@ -368,14 +373,16 @@ def _records_to_rows(records: list[dict], headers: list[str]) -> list[list]:
 
 def append_deactivated(r2_records: list[dict], sheet_id: str) -> None:
     """
-    Append R2 rows to 'Deactivated This Period'.
-    Empty list → no-op (no API call, no error).
-    Writes headers to row 1 first if the tab is empty.
+    Append net-new R2 rows to 'Deactivated This Period'.
+    Loads existing rows ONCE into pandas, deduplicates in-process, writes only
+    truly new rows — never queries Sheets in a loop.
+    Dedup key: (carrier, policy_number, coverage_end_date), keep='first'.
     """
     if not r2_records:
         log.info("append_deactivated: empty list — nothing written")
         return
 
+    found_count = len(r2_records)
     sheets, _ = _get_services()
 
     if _read_a1(sheets, sheet_id, TAB_DEACTIVATED) != R2_HEADERS[0]:
@@ -387,7 +394,46 @@ def append_deactivated(r2_records: list[dict], sheet_id: str) -> None:
         ).execute()
         log.info("append_deactivated: wrote missing headers to row 1")
 
-    rows = _records_to_rows(r2_records, R2_HEADERS)
+    resp = sheets.spreadsheets().values().get(
+        spreadsheetId=sheet_id,
+        range=f"'{TAB_DEACTIVATED}'!A:Z",
+    ).execute()
+    existing_values = resp.get("values", [])
+
+    if len(existing_values) > 1:
+        existing_df = pd.DataFrame(existing_values[1:], columns=existing_values[0])
+    else:
+        existing_df = pd.DataFrame(columns=R2_HEADERS)
+
+    rows_before = len(existing_df)
+
+    new_df = pd.DataFrame(r2_records)
+    new_df = new_df.reindex(columns=R2_HEADERS)
+    new_df = new_df.fillna("").astype(str)
+
+    combined_df = pd.concat([existing_df, new_df], ignore_index=True)
+    combined_df = combined_df.drop_duplicates(
+        subset=["carrier", "policy_number", "coverage_end_date"],
+        keep="first",
+    )
+
+    net_new = len(combined_df) - rows_before
+    already_in_file = found_count - net_new
+
+    log.info(
+        "sheets | R2 | found=%d | already_in_file=%d | net_new_appended=%d",
+        found_count, already_in_file, net_new,
+    )
+
+    if net_new == 0:
+        return
+
+    net_new_df = combined_df.iloc[rows_before:]
+    rows = [
+        [str(v) if v is not None else "" for v in row]
+        for row in net_new_df.values.tolist()
+    ]
+
     sheets.spreadsheets().values().append(
         spreadsheetId=sheet_id,
         range=f"'{TAB_DEACTIVATED}'!A1",
@@ -395,14 +441,12 @@ def append_deactivated(r2_records: list[dict], sheet_id: str) -> None:
         insertDataOption="INSERT_ROWS",
         body={"values": rows},
     ).execute()
-    log.info(f"append_deactivated: {len(rows)} rows written (sheet={sheet_id})")
 
 
 def append_r1_log(r1_records: list[dict], sheet_id: str) -> None:
     """
     Append raw R1 rows to 'Active Members' (audit trail for Looker Studio).
     Empty list → no-op.
-    Writes headers to row 1 first if the tab is empty.
     """
     if not r1_records:
         log.info("append_r1_log: empty list — nothing written")
@@ -432,20 +476,27 @@ def append_r1_log(r1_records: list[dict], sheet_id: str) -> None:
 
 # ─── Top-level entry point ────────────────────────────────────────────────────
 
-def write_run(
-    r1_records: list[dict],
-    r2_records: list[dict],
-    dry_run: bool = False,
-) -> None:
+def push_to_sheets(dry_run: bool = False) -> None:
     """
-    Top-level function. This is what main.py calls in Phase 8.
+    Read carrier XLSX files from disk, push to Google Sheets.
 
     Flow:
+        _read_r1_from_disk         → list of R1 dicts (all carriers)
+        _read_r2_from_disk         → list of R2 dicts (deactivated_members.xlsx)
         get_or_create_month_sheet  → sheet_id
         write_summary              → overwrites Summary tab
-        append_deactivated         → appends to Deactivated This Period
-        append_r1_log              → appends to Active Members
+        append_deactivated         → appends net-new R2 to Deactivated This Period
+        append_r1_log              → appends R1 audit trail to Active Members
+
+    Step 2 of the two-step operator flow (bots → XLSX → Sheets). Never called
+    automatically by bots; the launcher's [Push to Sheets] button invokes it.
     """
+    global log
+    log = setup_logging("SHEETS")
+
+    r1_records = _read_r1_from_disk()
+    r2_records = _read_r2_from_disk()
+
     today = date.today()
     sheet_id = get_or_create_month_sheet(today.year, today.month)
 
@@ -460,118 +511,27 @@ def write_run(
     write_summary(r1_records, sheet_id)
     append_deactivated(r2_records, sheet_id)
     append_r1_log(r1_records, sheet_id)
-    log.info("write_run complete")
+    log.info("push_to_sheets complete")
 
 
-# ─── Standalone test ──────────────────────────────────────────────────────────
+# ─── Standalone CLI ───────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Phase 3 — Sheets writer",
+        description="Push carrier XLSX files to Google Sheets",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "examples:\n"
             "  python scripts/sheets_writer.py\n"
-            "    → prints this help (no writes)\n\n"
-            "  python scripts/sheets_writer.py --test\n"
-            "    → writes 2-agent test fixture to the live sheet\n\n"
-            "  python scripts/sheets_writer.py --test --dry-run\n"
-            "    → resolves sheet ID and logs what would be written, no API writes\n\n"
+            "    → read data/output/*.xlsx, push to Sheets\n\n"
+            "  python scripts/sheets_writer.py --dry-run\n"
+            "    → log what would be written, no API writes\n\n"
             "env vars required (.env):\n"
             "  SHEET_ID_APRIL_2026   (or DRIVE_FOLDER_ID if not pinning)\n"
             "  GOOGLE_SERVICE_ACCOUNT_JSON\n"
         ),
     )
-    parser.add_argument("--test",    action="store_true", help="Write 2-agent fixture data to the live sheet")
-    parser.add_argument("--dry-run", action="store_true", help="Resolve sheet ID but skip all Sheets writes (use with --test)")
+    parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
-    if not args.test:
-        parser.print_help()
-        sys.exit(0)
-
-    setup_logging()
-
-    # 2-agent × 2-carrier test — Brandon missing Cigna (failed) → blank cell
-    TEST_R1 = [
-        {
-            "run_date": date.today().isoformat(),
-            "run_type": "Monday",
-            "carrier": "Ambetter",
-            "agent_name": "Brandon Kaplan",
-            "active_members": 95,
-            "status": "success",
-            "error_message": None,
-            "duration_seconds": 42.3,
-        },
-        {
-            "run_date": date.today().isoformat(),
-            "run_type": "Monday",
-            "carrier": "Molina",
-            "agent_name": "Brandon Kaplan",
-            "active_members": 6,
-            "status": "success",
-            "error_message": None,
-            "duration_seconds": 18.1,
-        },
-        {
-            "run_date": date.today().isoformat(),
-            "run_type": "Monday",
-            "carrier": "Ambetter",
-            "agent_name": "Felipe Ramirez",
-            "active_members": 461,
-            "status": "success",
-            "error_message": None,
-            "duration_seconds": 38.7,
-        },
-        {
-            "run_date": date.today().isoformat(),
-            "run_type": "Monday",
-            "carrier": "Cigna",
-            "agent_name": "Felipe Ramirez",
-            "active_members": 72,
-            "status": "success",
-            "error_message": None,
-            "duration_seconds": 22.4,
-        },
-        # Cigna failed for Brandon — excluded from pivot → blank cell, not zero
-        {
-            "run_date": date.today().isoformat(),
-            "run_type": "Monday",
-            "carrier": "Cigna",
-            "agent_name": "Brandon Kaplan",
-            "active_members": None,
-            "status": "failed",
-            "error_message": "timeout waiting for element",
-            "duration_seconds": 45.0,
-        },
-    ]
-
-    TEST_R2 = [
-        {
-            "run_date": date.today().isoformat(),
-            "carrier": "Ambetter",
-            "agent_name": "Brandon Kaplan",
-            "member_name": "Emily Rink",
-            "member_dob": "07/24/2000",
-            "state": "SC",
-            "coverage_end_date": "2026-03-24",
-            "policy_number": "U70066328",
-            "last_status": "Cancelled",
-            "detection_method": "download_filter",
-        },
-        {
-            "run_date": date.today().isoformat(),
-            "carrier": "Molina",
-            "agent_name": "Felipe Ramirez",
-            "member_name": "Carlos Mendoza",
-            "member_dob": "03/15/1985",
-            "state": "FL",
-            "coverage_end_date": "2026-03-28",
-            "policy_number": "M90012345",
-            "last_status": "Terminated",
-            "detection_method": "download_filter",
-        },
-    ]
-
-    write_run(TEST_R1, TEST_R2, dry_run=args.dry_run)
+    push_to_sheets(dry_run=args.dry_run)

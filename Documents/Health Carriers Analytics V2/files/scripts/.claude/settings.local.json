@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/cec19/Documents/Health Carriers Analytics V2/files/**)",
+      "Bash(python scripts/ambetter_bot.py --agent 0 --dry-run)"
+    ]
+  }
+}

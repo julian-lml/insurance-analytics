@@ -41,11 +41,17 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.service import Service
 from selenium.common.exceptions import TimeoutException
 from webdriver_manager.chrome import ChromeDriverManager
-from datetime import date, timedelta
 
 # Project root on sys.path so sibling imports work
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from scripts.molina_report import process_csv
+from scripts.utils import (
+    setup_logging,
+    with_retry,
+    run_type,
+    write_r1_xlsx,
+    append_deactivated_xlsx,
+)
 
 load_dotenv()
 
@@ -65,7 +71,7 @@ SELECTORS = MCFG["selectors"]
 
 TODAY    = date.today()
 RUN_DATE = TODAY.isoformat()
-RUN_TYPE = "Monday" if TODAY.weekday() == 0 else "Friday"
+RUN_TYPE = run_type()
 
 
 def _load_agents() -> list[dict]:
@@ -104,177 +110,7 @@ def _load_agents() -> list[dict]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# REUSABLE PATTERN 1 — Logging
-# Copy this block unchanged into every phase script.
-# ─────────────────────────────────────────────────────────────────────────────
-
-def calculate_period_start(today: date = None) -> date:
-    if today is None:
-        today = date.today()
-    return today.replace(day=1) - timedelta(days=1)
-    
-def _append_deactivated_xlsx(r2_records: list[dict]) -> None:
-    """
-    Appends R2 records to the shared deactivated members log.
-    Creates the file if it doesn't exist. Never overwrites existing rows.
-    Dedup key: (carrier, policy_number, coverage_end_date), keep='first'.
-    Logs found / already_in_file / net_new_appended counts.
-    """
-    if not r2_records:
-        return
-
-    found_count = len(r2_records)
-
-    # Null policy_number guard — skip and warn before any append
-    clean_records: list[dict] = []
-    for rec in r2_records:
-        pn = rec.get("policy_number")
-        if not pn or (isinstance(pn, str) and not pn.strip()):
-            log.warning(
-                "Molina | R2 | skipping — policy_number is null | member=%s | agent=%s",
-                rec.get("member_name", "UNKNOWN"), rec.get("agent_name", "UNKNOWN"),
-            )
-        else:
-            clean_records.append(rec)
-
-    valid_count = len(clean_records)
-
-    if not clean_records:
-        log.info(
-            "Molina | R2 | found=%d | already_in_file=%d | net_new_appended=%d",
-            found_count, 0, 0,
-        )
-        return
-
-    output_path = ROOT / "data" / "output" / "deactivated_members.xlsx"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    new_df = pd.DataFrame(clean_records)
-
-    # Columns to keep, in order
-    cols = [
-        "run_date", "carrier", "agent_name", "member_name",
-        "member_dob", "state", "coverage_end_date", "policy_number",
-        "last_status", "detection_method",
-    ]
-    # Only keep columns that exist (graceful if optional fields missing)
-    cols = [c for c in cols if c in new_df.columns]
-    new_df = new_df[cols]
-
-    if output_path.exists():
-        existing_df = pd.read_excel(output_path, engine="openpyxl")
-        rows_before = len(existing_df)
-        combined_df = pd.concat([existing_df, new_df], ignore_index=True)
-    else:
-        rows_before = 0
-        combined_df = new_df
-
-    combined_df = combined_df.drop_duplicates(
-        subset=["carrier", "policy_number", "coverage_end_date"],
-        keep="first",
-    )
-
-    net_new = len(combined_df) - rows_before
-    already_in_file = valid_count - net_new
-
-    with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
-        combined_df.to_excel(writer, index=False, sheet_name="Deactivated Members")
-        ws = writer.sheets["Deactivated Members"]
-        ws.column_dimensions["A"].width = 14  # run_date
-        ws.column_dimensions["B"].width = 12  # carrier
-        ws.column_dimensions["C"].width = 22  # agent_name
-        ws.column_dimensions["D"].width = 28  # member_name
-        ws.column_dimensions["E"].width = 14  # member_dob
-        ws.column_dimensions["F"].width = 8   # state
-        ws.column_dimensions["G"].width = 20  # coverage_end_date
-        ws.column_dimensions["H"].width = 16  # policy_number
-
-    log.info(
-        "Molina | R2 | found=%d | already_in_file=%d | net_new_appended=%d",
-        found_count, already_in_file, net_new,
-    )
-
-def setup_logging(carrier: str = "MOLINA") -> tuple[logging.Logger, Path]:
-    """
-    Creates a per-run log file at logs/run_YYYYMMDD_HHMM.log.
-    Format: timestamp | CARRIER | LEVEL | message
-    Returns (logger, log_file_path).
-    """
-    LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    log_file = LOGS_DIR / f"run_{datetime.now().strftime('%Y%m%d_%H%M')}.log"
-
-    fmt = logging.Formatter(f"%(asctime)s | {carrier} | %(levelname)s | %(message)s")
-
-    log = logging.getLogger(f"downloader.{carrier.lower()}")
-    log.setLevel(logging.DEBUG)
-
-    # Avoid duplicate handlers if called multiple times in the same process
-    if not log.handlers:
-        fh = logging.FileHandler(log_file, encoding="utf-8")
-        fh.setFormatter(fmt)
-        ch = logging.StreamHandler(sys.stdout)
-        ch.setFormatter(fmt)
-        log.addHandler(fh)
-        log.addHandler(ch)
-
-    return log, log_file
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# REUSABLE PATTERN 2 — Retry
-# Copy with_retry() unchanged into every phase script.
-# NOTE: Auth failures must NOT use this. Detect wrong credentials separately
-#       and raise immediately — retrying a bad password locks accounts.
-# ─────────────────────────────────────────────────────────────────────────────
-
-_BACKOFF = [5, 15, 45]   # seconds — architecture standard
-
-
-def with_retry(
-    func,
-    operation_name: str = "operation",
-    max_attempts: int = 3,
-    backoff: list[int] = _BACKOFF,
-    log: logging.Logger = None,
-):
-    """
-    Calls func() up to max_attempts times with exponential backoff.
-    Returns func()'s return value on success.
-    Raises RuntimeError with diagnostics after all attempts fail.
-
-    Usage:
-        csv_path = with_retry(
-            lambda: step_download_csv(driver, download_path, log),
-            operation_name="csv_download",
-            log=log,
-        )
-    """
-    last_exc = None
-    for attempt in range(1, max_attempts + 1):
-        try:
-            return func()
-        except Exception as exc:
-            last_exc = exc
-            if log:
-                log.warning(
-                    f"{operation_name}: attempt {attempt}/{max_attempts} failed — {exc}"
-                )
-            if attempt < max_attempts:
-                wait = backoff[attempt - 1]
-                if log:
-                    log.info(f"Waiting {wait}s before retry…")
-                time.sleep(wait)
-
-    raise RuntimeError(
-        f"{operation_name} failed after {max_attempts} attempts. "
-        f"Last error: {last_exc}\n"
-        "Per no-spiral rule: diagnose root cause before attempting again. "
-        "Do NOT call with_retry a 4th time."
-    ) from last_exc
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# REUSABLE PATTERN 3 — Chrome driver setup
+# Chrome driver setup
 # Copy setup_driver() unchanged into every phase script.
 # The download_path arg changes per carrier — everything else stays the same.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -745,7 +581,7 @@ def run_molina(dry_run: bool = False, agent_filter: int | None = None) -> dict:
         already-processed agents — this is acceptable. Missing deactivations
         (from skipped agents) is NOT acceptable.
     """
-    log, log_file = setup_logging("MOLINA")
+    log = setup_logging("MOLINA")
     total_start = time.time()
 
     # ── Pre-flight: load agents ───────────────────────────────────────────
@@ -781,7 +617,6 @@ def run_molina(dry_run: bool = False, agent_filter: int | None = None) -> dict:
     last_run_date = read_last_run_date()
     log.info(f"Run: {RUN_DATE} ({RUN_TYPE}) | last_run: {last_run_date or 'none'}")
     log.info(f"Agents to process: {len(agents)}")
-    log.info(f"Log file: {log_file}")
 
     # ── Loop through agents ───────────────────────────────────────────────
     all_r1 = []
@@ -846,14 +681,11 @@ def run_molina(dry_run: bool = False, agent_filter: int | None = None) -> dict:
     elif dry_run:
         log.info("Dry run — state file NOT updated")
 
-    # ── Write combined XLSX (all agents) ──────────────────────────────────
-    # Skipped on dry run. This replaces the per-agent XLSX from v1.
+    # ── Write XLSX outputs (merge-on-write for R1; append+dedup for R2) ───
     if not dry_run and overall_status in ("success", "partial"):
-        try:
-            _write_combined_xlsx(all_r1)
-            _append_deactivated_xlsx(all_r2)  # ← agregar esta línea
-        except Exception as exc:
-            log.warning(f"XLSX write failed (non-fatal): {exc}")
+        success_r1 = [r for r in all_r1 if r.get("status") == "success"]
+        write_r1_xlsx(success_r1, "Molina", log)
+        append_deactivated_xlsx(all_r2, "Molina", log)
 
     return {
         "r1":     all_r1,
@@ -888,38 +720,6 @@ def _build_download_path(agent_name: str) -> Path:
     )
     path.mkdir(parents=True, exist_ok=True)
     return path
-
-
-def _write_combined_xlsx(r1_records: list[dict]) -> None:
-    """
-    Writes a combined XLSX with all agents' active member counts.
-    This replaces the per-agent XLSX from molina_report.py v1.
-    Only includes successful records.
-    """
-    import pandas as pd
-
-    success_records = [r for r in r1_records if r.get("status") == "success"]
-    if not success_records:
-        return
-
-    new_df = pd.DataFrame(success_records)[["agent_name", "active_members"]]
-    new_df.columns = ["Agent", "Active Members"]
-
-    output_path = ROOT / "data" / "output" / "molina_all_agents.xlsx"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    if output_path.exists():
-        existing_df = pd.read_excel(output_path, engine="openpyxl")
-        agent_names = new_df["Agent"].unique().tolist()
-        existing_df = existing_df[~existing_df["Agent"].isin(agent_names)]
-        df = pd.concat([existing_df, new_df], ignore_index=True)
-    else:
-        df = new_df
-
-    df = df.sort_values("Active Members", ascending=False)
-
-    with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="Active Members")
 
 
 def _failed_result(error_msg: str, start: float) -> dict:

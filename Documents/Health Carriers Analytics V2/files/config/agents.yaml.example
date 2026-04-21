@@ -1,0 +1,97 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# agents.yaml — Carrier agent credentials
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# COPY this file to config/agents.yaml and fill in real credentials.
+# config/agents.yaml is in .gitignore — never committed.
+#
+# Structure: each carrier has a list of agents. Each agent has:
+#   name:  display name (used in R1/R2 records and logs)
+#   user:  portal login username
+#   pass:  portal login password
+#   email: (Cigna only) webmail address for 2FA codes
+#
+# To add/remove an agent: edit this file. No code changes needed.
+# ─────────────────────────────────────────────────────────────────────────────
+
+molina:
+  - name: "Justin Santa"
+    user: "jsanta@example.com"
+    pass: "changeme"
+
+  - name: "Maria Lopez"
+    user: "mlopez@example.com"
+    pass: "changeme"
+
+  # Add all 19 agents here. One block per agent.
+  # The downloader loops through this list automatically.
+
+# cigna:
+#   - name: "Justin Santa"
+#     user: "jsanta_cigna"
+#     pass: "changeme"
+#     email: "jsanta@webmail.ligagent.com"
+#     email_pass: "changeme"
+
+# ambetter:
+#   - name: "Broker Account"
+#     user: "broker@example.com"
+#     pass: "changeme"
+
+# united:
+#   - name: "Main Account"
+#     user: "broker@example.com"
+#     pass: "changeme"
+
+oscar:
+  - name: "Anthony Montenegro"
+    user: "agent@example.com"
+    pass: "changeme"
+
+  - name: "Brandon Kaplan"
+    user: "agent@example.com"
+    pass: "changeme"
+
+  - name: "Felipe Ramirez"
+    user: "agent@example.com"
+    pass: "changeme"
+
+  - name: "Jonathan Diaz"
+    user: "agent@example.com"
+    pass: "changeme"
+
+  - name: "Jose Lares"
+    user: "agent@example.com"
+    pass: "changeme"
+
+  - name: "Justin Santa"
+    user: "agent@example.com"
+    pass: "changeme"
+
+  - name: "Kerry St Germain"
+    user: "agent@example.com"
+    pass: "changeme"
+
+  - name: "Layla Espinel"
+    user: "agent@example.com"
+    pass: "changeme"
+
+  - name: "Luis Sossa"
+    user: "agent@example.com"
+    pass: "changeme"
+
+  - name: "Michael Lavernia"
+    user: "agent@example.com"
+    pass: "changeme"
+
+  - name: "Osmayra Vega"
+    user: "agent@example.com"
+    pass: "changeme"
+
+  - name: "Ruddy Ortega"
+    user: "agent@example.com"
+    pass: "changeme"
+
+  - name: "Yusbell Ortega"
+    user: "agent@example.com"
+    pass: "changeme"
