@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Limitless Insurance — Active Members Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400&family=Geist+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ─── RESET ───────────────────────────────────────────── */
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#F5F6F9;--white:#FFFFFF;--s2:#ECEEF4;
+  --navy:#17243E;--navy2:#1F2F52;--navy3:#263660;
+  --slate:#3D4F72;--steel:#64748B;--mist:#94A3B8;
+  --edge:#DDE2EC;--edge2:#C8D0DF;
+  --txt:#17243E;--txt2:#3D4F72;--txt3:#64748B;--txt4:#94A3B8;
+  --blue:#2A5FBF;--blue-l:#EBF1FB;
+  --green:#0A7A52;--green-l:#EBFAF4;--green-e:#9CDCC4;
+  --red:#C0272D;--red-l:#FEF0F0;--red-e:#F5AAAC;
+  --amber:#B45309;--amber-l:#FEF9EB;--amber-e:#FCD38A;
+  --coral:#C0503A;
+  --amb:#2A5FBF;--cig:#6D3BBF;--mol:#0A7A52;--osc:#B45309;--uhc:#A82060;
+  --sh1:0 1px 4px rgba(23,36,62,.07),0 1px 2px rgba(23,36,62,.04);
+  --sh2:0 4px 20px rgba(23,36,62,.09),0 2px 8px rgba(23,36,62,.04);
+  --sh3:0 12px 48px rgba(23,36,62,.12);
+}
+body{background:var(--bg);color:var(--txt);font-family:'Outfit',sans-serif;min-height:100vh;overflow:hidden}
+body.ready{overflow:auto}
+::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--edge2);border-radius:3px}
+
+/* ─── LOADING SCREEN ─────────────────────────────────── */
+#loader{position:fixed;inset:0;background:var(--navy);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0px;transition:opacity .8s ease, visibility .8s ease}
+#loader.done{opacity:0;visibility:hidden;pointer-events:none}
+.loader-logo{display:flex;flex-direction:column;align-items:center;gap:12px}
+.inf-svg{width:120px;height:56px;overflow:visible}
+.inf-path{fill:none;stroke:url(#infGrad);stroke-width:3.5;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:600;stroke-dashoffset:600;animation:drawInf 2s cubic-bezier(.4,0,.2,1) forwards}
+.loader-wordmark{opacity:0;animation:fadeWordmark .6s ease .8s forwards}
+.loader-wordmark .lig{font-family:'Cormorant Garamond',serif;font-size:34px;font-weight:600;letter-spacing:6px;color:#fff;text-transform:uppercase;line-height:1}
+.loader-wordmark .sub{font-family:'Outfit',sans-serif;font-size:10px;letter-spacing:5px;text-transform:uppercase;color:rgba(255,255,255,.4);text-align:center;margin-top:5px}
+.loader-tagline{font-family:'Outfit',sans-serif;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:rgba(255,255,255,.25);margin-top:32px;opacity:0;animation:fadeWordmark .5s ease 1.4s forwards}
+@keyframes drawInf{to{stroke-dashoffset:0}}
+@keyframes fadeWordmark{to{opacity:1}}
+
+/* ─── SHELL ──────────────────────────────────────────── */
+.shell{display:flex;min-height:100vh;opacity:0;transition:opacity .6s ease}
+.shell.visible{opacity:1}
+
+/* ─── SIDEBAR ────────────────────────────────────────── */
+.sidebar{width:228px;background:var(--navy);flex-shrink:0;position:fixed;top:0;left:0;height:100vh;display:flex;flex-direction:column;z-index:100;box-shadow:var(--sh3)}
+.sb-logo{padding:28px 22px 22px;border-bottom:1px solid rgba(255,255,255,.07);display:flex;flex-direction:column;align-items:flex-start;gap:0}
+.sb-inf{width:52px;height:26px;margin-bottom:8px;overflow:visible}
+.sb-inf-path{fill:none;stroke:url(#sbGrad);stroke-width:2.8;stroke-linecap:round}
+.sb-wordmark{font-family:'Cormorant Garamond',serif;font-size:20px;font-weight:600;letter-spacing:4px;color:#fff;text-transform:uppercase;line-height:1}
+.sb-sub{font-family:'Outfit',sans-serif;font-size:8.5px;letter-spacing:3px;text-transform:uppercase;color:rgba(255,255,255,.35);margin-top:3px}
+.sb-nav{padding:18px 0;flex:1}
+.nav-sep{font-size:9px;letter-spacing:1.8px;text-transform:uppercase;color:rgba(255,255,255,.25);font-weight:600;padding:8px 22px 5px;margin-top:8px}
+.nav-sep:first-child{margin-top:0}
+.nav-item{display:flex;align-items:center;gap:10px;padding:10px 22px;cursor:pointer;color:rgba(255,255,255,.5);font-size:13px;font-weight:500;transition:all .18s;border-left:2px solid transparent;user-select:none;position:relative}
+.nav-item:hover{color:rgba(255,255,255,.85);background:rgba(255,255,255,.04)}
+.nav-item.active{color:#fff;background:rgba(255,255,255,.07);border-left-color:var(--coral)}
+.nav-item .ni{font-size:14px;width:18px;text-align:center;opacity:.7}
+.nav-item.active .ni{opacity:1}
+.sb-footer{padding:16px 22px 20px;border-top:1px solid rgba(255,255,255,.07)}
+.sb-date-lbl{font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.25);margin-bottom:3px}
+.sb-date-val{font-size:12px;color:rgba(255,255,255,.55);font-family:'Geist Mono',monospace}
+.sb-agents{font-size:11px;color:rgba(255,255,255,.3);margin-top:4px}
+
+/* ─── MAIN ───────────────────────────────────────────── */
+.main{margin-left:228px;flex:1;display:flex;flex-direction:column}
+.topbar{background:var(--white);border-bottom:1px solid var(--edge);padding:14px 32px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50;box-shadow:var(--sh1)}
+.tb-left h1{font-family:'Cormorant Garamond',serif;font-size:21px;font-weight:600;color:var(--navy)}
+.tb-left p{font-size:11px;color:var(--txt4);margin-top:1px}
+.tb-right{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
+.tb-badge{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--green);font-weight:600}
+.tb-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 0 2px var(--green-l)}
+.tb-meta{font-size:11px;color:var(--txt4)}
+.content{padding:26px 32px 64px;max-width:1240px}
+
+/* ─── GRIDS ──────────────────────────────────────────── */
+.g{display:grid;gap:14px}
+.g4{grid-template-columns:repeat(4,1fr)}
+.g3{grid-template-columns:repeat(3,1fr)}
+.g2{grid-template-columns:1fr 1fr}
+.g21{grid-template-columns:2fr 1fr}
+@media(max-width:1100px){.g4{grid-template-columns:1fr 1fr}.g3{grid-template-columns:1fr 1fr}.g2,.g21{grid-template-columns:1fr}}
+
+/* ─── KPI ────────────────────────────────────────────── */
+.kpi{background:var(--white);border:1px solid var(--edge);border-radius:14px;padding:18px 20px;box-shadow:var(--sh1);position:relative;overflow:hidden;transition:box-shadow .2s,transform .2s}
+.kpi:hover{box-shadow:var(--sh2);transform:translateY(-1px)}
+.kpi-bar{position:absolute;top:0;left:0;right:0;height:3px;border-radius:14px 14px 0 0}
+.kpi-label{font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--txt4);margin-bottom:8px}
+.kpi-val{font-family:'Cormorant Garamond',serif;font-size:34px;font-weight:700;color:var(--navy);line-height:1}
+.kpi-badge{display:inline-flex;align-items:center;gap:3px;margin-top:8px;padding:3px 10px;border-radius:20px;font-size:10.5px;font-weight:700;font-family:'Geist Mono',monospace}
+.b-red{background:var(--red-l);color:var(--red)}
+.b-green{background:var(--green-l);color:var(--green)}
+.b-amber{background:var(--amber-l);color:var(--amber)}
+.b-blue{background:var(--blue-l);color:var(--blue)}
+.kpi-sub{font-size:11px;color:var(--txt4);margin-top:5px}
+
+/* ─── SECTION HEADER ─────────────────────────────────── */
+.sh{margin:24px 0 14px}
+.sh h2{font-size:15px;font-weight:700;color:var(--navy);letter-spacing:-.2px}
+.sh p{font-size:12px;color:var(--txt3);margin-top:2px}
+.sh.first{margin-top:0}
+hr.rule{border:none;border-top:1px solid var(--edge);margin:4px 0 0}
+
+/* ─── CARDS ──────────────────────────────────────────── */
+.card{background:var(--white);border:1px solid var(--edge);border-radius:14px;padding:20px;box-shadow:var(--sh1)}
+.card-hd{font-size:13px;font-weight:700;color:var(--navy)}
+.card-sub{font-size:11.5px;color:var(--txt3);margin-bottom:14px;margin-top:2px}
+
+/* ─── CALLOUTS ───────────────────────────────────────── */
+.cbox{border-radius:10px;padding:16px 18px;margin-bottom:10px;border-left:3px solid}
+.cbox h3{font-size:12px;font-weight:700;margin-bottom:5px}
+.cbox p{font-size:12.5px;color:var(--txt2);line-height:1.7}
+.cbox strong{color:var(--txt)}
+.c-red{background:var(--red-l);border-color:var(--red)}.c-red h3{color:var(--red)}
+.c-green{background:var(--green-l);border-color:var(--green)}.c-green h3{color:var(--green)}
+.c-amber{background:var(--amber-l);border-color:var(--amber)}.c-amber h3{color:var(--amber)}
+.c-blue{background:var(--blue-l);border-color:var(--blue)}.c-blue h3{color:var(--blue)}
+.c-navy{background:#EDF0F8;border-color:var(--navy)}.c-navy h3{color:var(--navy)}
+
+/* ─── TABLE ──────────────────────────────────────────── */
+.tbl-wrap{border:1px solid var(--edge);border-radius:12px;overflow:hidden;overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+thead tr{background:var(--navy)}
+thead th{padding:10px 13px;text-align:left;font-size:9.5px;letter-spacing:.8px;text-transform:uppercase;font-weight:700;color:rgba(255,255,255,.65);white-space:nowrap}
+thead th:not(:first-child){text-align:center}
+tbody tr{border-bottom:1px solid var(--edge);transition:background .1s}
+tbody tr:last-child{border-bottom:none}
+tbody tr:hover{background:var(--s2)}
+tbody td{padding:9px 13px;color:var(--txt2);white-space:nowrap}
+tbody td.tc{text-align:center;font-family:'Geist Mono',monospace;font-size:11.5px}
+.td-a{font-weight:700;color:var(--navy)}
+.td-new{font-size:9px;background:var(--blue-l);color:var(--blue);padding:1px 5px;border-radius:3px;font-weight:700;margin-left:4px;vertical-align:middle}
+.td-pos{color:var(--green);font-weight:700}
+.td-neg{color:var(--red);font-weight:700}
+.td-flat{color:var(--txt4)}
+.td-miss{color:var(--edge2);font-style:italic;font-size:11px}
+.tfoot-row{background:var(--navy) !important}
+.tfoot-row td{color:#fff !important;font-weight:700}
+
+/* ─── FILTER ─────────────────────────────────────────── */
+.filter-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+.fl{font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--txt4)}
+select{background:var(--white);border:1px solid var(--edge2);border-radius:8px;padding:6px 11px;font-size:12.5px;font-family:'Outfit',sans-serif;color:var(--txt);cursor:pointer;outline:none;transition:border-color .15s}
+select:focus{border-color:var(--blue)}
+
+/* ─── LOSS BAR ───────────────────────────────────────── */
+.lbar-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--edge)}
+.lbar-row:last-child{border-bottom:none}
+.lbar-name{width:120px;font-weight:700;font-size:12.5px;color:var(--navy);flex-shrink:0}
+.lbar-track{flex:1;background:var(--s2);border-radius:4px;height:11px;overflow:hidden}
+.lbar-fill{height:100%;border-radius:4px;background:linear-gradient(90deg,var(--red),#E87070)}
+.lbar-nums{width:148px;text-align:right;font-family:'Geist Mono',monospace;font-size:11px;flex-shrink:0}
+.lbar-pct{font-weight:700;color:var(--red)}
+.lbar-abs{color:var(--txt4)}
+
+/* ─── ACTIONS ────────────────────────────────────────── */
+.actions-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:12px;margin-top:14px}
+.acard{background:var(--white);border:1px solid var(--edge);border-radius:12px;padding:18px;border-left:3px solid;box-shadow:var(--sh1)}
+.acard .icon{font-size:18px;margin-bottom:7px}
+.acard h4{font-size:13px;font-weight:700;color:var(--navy);margin-bottom:5px}
+.acard p{font-size:12px;color:var(--txt3);line-height:1.6}
+.pri{display:inline-block;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;padding:2px 7px;border-radius:4px;margin-bottom:6px}
+.p-u{background:var(--red-l);color:var(--red)}
+.p-h{background:var(--amber-l);color:var(--amber)}
+.p-m{background:var(--blue-l);color:var(--blue)}
+
+/* ─── CDOT ───────────────────────────────────────────── */
+.cdot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle;flex-shrink:0}
+
+/* ─── DQ CHIPS ───────────────────────────────────────── */
+.dq-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.dq-chip{padding:4px 11px;border-radius:20px;font-size:10.5px;font-weight:600;font-family:'Geist Mono',monospace}
+.dq-ok{background:var(--green-l);color:var(--green);border:1px solid var(--green-e)}
+.dq-p{background:var(--amber-l);color:var(--amber);border:1px solid var(--amber-e)}
+.dq-x{background:var(--red-l);color:var(--red);border:1px solid var(--red-e)}
+
+/* ─── WOW GRID ───────────────────────────────────────── */
+.wow-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(128px,1fr));gap:8px}
+
+/* ─── PAGE ANIM ──────────────────────────────────────── */
+.page-in{animation:pageIn .22s ease}
+@keyframes pageIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+/* ─── CARRIER LEGEND ─────────────────────────────────── */
+.cleg{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--edge)}
+.cleg:last-child{border-bottom:none}
+.cleg-l{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600}
+.cleg-pct{font-size:11px;color:var(--txt3);margin-right:10px}
+.cleg-v{font-family:'Geist Mono',monospace;font-weight:700;font-size:13px}
+
+/* ─── PASSWORD GATE ──────────────────────────────────── */
+@keyframes shake{0%,100%{transform:translateX(0)}10%,50%,90%{transform:translateX(-8px)}30%,70%{transform:translateX(8px)}}
+#gate-input.shake{animation:shake .5s ease}
+#gate-input:focus{border-color:rgba(255,255,255,.4)!important}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════
+     PASSWORD GATE
+═══════════════════════════════════════════════════════ -->
+<div id="gate" style="display:none;position:fixed;inset:0;background:var(--navy);z-index:10000;flex-direction:column;align-items:center;justify-content:center;gap:0">
+  <div class="loader-logo">
+    <svg class="inf-svg" viewBox="0 0 200 80" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="gateGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stop-color="#7A9FD4"/>
+          <stop offset="50%" stop-color="#C8D8EE"/>
+          <stop offset="100%" stop-color="#7A9FD4"/>
+        </linearGradient>
+      </defs>
+      <path style="fill:none;stroke:url(#gateGrad);stroke-width:3.5;stroke-linecap:round;stroke-linejoin:round"
+        d="M100,40 C100,14 76,6 57,6 C35,6 18,22 18,40 C18,58 35,74 57,74 C79,74 100,58 100,40 C100,22 121,6 143,6 C165,6 182,22 182,40 C182,58 165,74 143,74 C121,74 100,58 100,40"/>
+    </svg>
+    <div style="opacity:1" class="loader-wordmark">
+      <div class="lig">LIMITLESS</div>
+      <div class="sub">Insurance Group</div>
+    </div>
+  </div>
+  <form id="gate-form" style="margin-top:40px;display:flex;flex-direction:column;align-items:center;gap:12px">
+    <div style="font-family:'Outfit',sans-serif;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:rgba(255,255,255,.35)">Enter Password</div>
+    <input id="gate-input" type="password" autocomplete="current-password"
+      style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.15);border-radius:8px;padding:11px 18px;font-size:14px;font-family:'Outfit',sans-serif;color:#fff;outline:none;width:240px;text-align:center;transition:border-color .2s"
+      placeholder="••••••••••••"/>
+    <button type="submit"
+      style="background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);border-radius:8px;padding:9px 28px;color:#fff;font-family:'Outfit',sans-serif;font-size:13px;font-weight:600;cursor:pointer;letter-spacing:.5px;transition:background .2s">
+      Unlock Dashboard
+    </button>
+  </form>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     LOADING SCREEN
+═══════════════════════════════════════════════════════ -->
+<div id="loader">
+  <div class="loader-logo">
+    <svg class="inf-svg" viewBox="0 0 200 80" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="infGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stop-color="#7A9FD4"/>
+          <stop offset="50%" stop-color="#C8D8EE"/>
+          <stop offset="100%" stop-color="#7A9FD4"/>
+        </linearGradient>
+      </defs>
+      <path class="inf-path"
+        d="M100,40 C100,14 76,6 57,6 C35,6 18,22 18,40 C18,58 35,74 57,74 C79,74 100,58 100,40 C100,22 121,6 143,6 C165,6 182,22 182,40 C182,58 165,74 143,74 C121,74 100,58 100,40"/>
+    </svg>
+    <div class="loader-wordmark">
+      <div class="lig">LIMITLESS</div>
+      <div class="sub">Insurance Group</div>
+    </div>
+  </div>
+  <div class="loader-tagline">Active Members Analytics · April 2026</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     SHELL
+═══════════════════════════════════════════════════════ -->
+<div class="shell" id="shell">
+
+<!-- SIDEBAR -->
+<aside class="sidebar">
+  <div class="sb-logo">
+    <svg class="sb-inf" viewBox="0 0 200 80" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="sbGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stop-color="#6A8EC4"/>
+          <stop offset="50%" stop-color="#B8CCDF"/>
+          <stop offset="100%" stop-color="#6A8EC4"/>
+        </linearGradient>
+      </defs>
+      <path class="sb-inf-path"
+        d="M100,40 C100,14 76,6 57,6 C35,6 18,22 18,40 C18,58 35,74 57,74 C79,74 100,58 100,40 C100,22 121,6 143,6 C165,6 182,22 182,40 C182,58 165,74 143,74 C121,74 100,58 100,40"/>
+    </svg>
+    <div class="sb-wordmark">Limitless</div>
+    <div class="sb-sub">Insurance Group</div>
+  </div>
+  <nav class="sb-nav">
+    <div class="nav-sep">Analytics</div>
+    <div class="nav-item active" data-page="overview" onclick="nav(this)">
+      <span class="ni">◈</span>Overview
+    </div>
+    <div class="nav-item" data-page="carriers" onclick="nav(this)">
+      <span class="ni">◉</span>Carriers
+    </div>
+    <div class="nav-item" data-page="agents" onclick="nav(this)">
+      <span class="ni">◎</span>Agents
+    </div>
+    <div class="nav-sep">Reports</div>
+    <div class="nav-item" data-page="ambetter" onclick="nav(this)">
+      <span class="ni">⚑</span>Ambetter Review
+    </div>
+    <div class="nav-item" data-page="insights" onclick="nav(this)">
+      <span class="ni">→</span>Insights & Actions
+    </div>
+  </nav>
+  <div class="sb-footer">
+    <div class="sb-date-lbl">Last Updated</div>
+    <div class="sb-date-val">April 27, 2026</div>
+    <div class="sb-agents">22 agents · 5 carriers</div>
+  </div>
+</aside>
+
+<!-- MAIN -->
+<div class="main">
+  <header class="topbar">
+    <div class="tb-left">
+      <h1 id="page-title">Portfolio Overview</h1>
+      <p>March 2 – April 27, 2026 &nbsp;·&nbsp; 16 snapshots</p>
+    </div>
+    <div class="tb-right">
+      <div class="tb-badge">Daily Report · April 27</div>
+      <div class="tb-meta">16 snapshots · 22 agents</div>
+    </div>
+  </header>
+  <div class="content" id="content"></div>
+</div>
+
+</div><!-- /shell -->
+
+<script>
+/* ═══════════════════════════════════════════════════════
+   PASSWORD + DATA LOADING
+═══════════════════════════════════════════════════════ */
+const PASSWORD_HASH='be00141939bdc2a9eb035a8eba964020b8731e31519053f4dd2117226079d04b';
+async function sha256(s){
+  const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s));
+  return Array.from(new Uint8Array(b)).map(x=>x.toString(16).padStart(2,'0')).join('');
+}
+
+/* ─── STATIC LOOKUPS ───────────────────────────────────── */
+const CCLR={Ambetter:"#2A5FBF",Cigna:"#6D3BBF",Molina:"#0A7A52",Oscar:"#B45309","United HC":"#A82060"};
+const CBG={Ambetter:"#EBF1FB",Cigna:"#F0EBFB",Molina:"#EBFAF4",Oscar:"#FEF9EB","United HC":"#FBF0F5"};
+const LEGACY=["Anthony Montenegro","Brandon Kaplan","Felipe Ramirez","Jonathan Diaz","Jose Ariza","Jose Lares","Juan Gallegos","Justin Santa","Kerry St Germain","Layla Espinel","Leysi Espinel","Luis Sosa","Michael Lavernia","Osmayra Vega","Ruddy Arteaga","Yusbell Ortega"];
+const NEW_A=["Nicholas Cuevas","Kirsten Cuevas","Aaron Duarte","Michael Ortiz","Danielle Attias"];
+const ALL_A=[...LEGACY,...NEW_A];
+
+/* ─── RUNTIME GLOBALS (set after fetch) ─────────────────── */
+let DATES,CARRIERS,D,LATEST,FIRST;
+
+/* ─── HELPERS ─────────────────────────────────────────── */
+const f=n=>n?.toLocaleString()??'—';
+const at=(d,a)=>CARRIERS.reduce((s,c)=>s+(D[d]?.[a]?.[c]||0),0);
+const ct=(d,c)=>ALL_A.reduce((s,a)=>s+(D[d]?.[a]?.[c]||0),0);
+const lct=(d,c)=>LEGACY.reduce((s,a)=>s+(D[d]?.[a]?.[c]||0),0);
+const gt=d=>ALL_A.reduce((s,a)=>s+at(d,a),0);
+const pchg=(a,b)=>b===0?'—':((a-b)/b*100).toFixed(1)+'%';
+const psign=(a,b)=>{const v=(a-b)/b*100;return(v>0?'+':'')+v.toFixed(1)+'%'};
+
+/* ─── CHART DEFAULTS ──────────────────────────────────── */
+const CD={responsive:true,maintainAspectRatio:false,
+  plugins:{legend:{labels:{color:'#64748B',font:{family:"'Outfit'",size:11.5},boxWidth:10,padding:14}},
+    tooltip:{backgroundColor:'#17243E',titleColor:'#fff',bodyColor:'#94A3B8',borderColor:'rgba(255,255,255,.08)',borderWidth:1,padding:12,cornerRadius:8,titleFont:{family:"'Outfit'",weight:'600'},bodyFont:{family:"'Geist Mono'",size:11.5}}},
+  scales:{x:{grid:{color:'#ECEEF4'},ticks:{color:'#94A3B8',font:{family:"'Outfit'",size:11}},border:{display:false}},
+    y:{grid:{color:'#ECEEF4'},ticks:{color:'#94A3B8',font:{family:"'Geist Mono'",size:11}},border:{display:false}}}
+};
+
+let CHS={};
+const killCharts=()=>{Object.values(CHS).forEach(c=>{try{c.destroy()}catch(e){}});CHS={}};
+
+/* ─── NAV ────────────────────────────────────────────── */
+const PT={overview:'Portfolio Overview',carriers:'Carrier Analysis',agents:'Agent Rankings',ambetter:'Ambetter Review',insights:'Insights & Actions'};
+function nav(el){
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  el.classList.add('active');
+  const page=el.dataset.page;
+  document.getElementById('page-title').textContent=PT[page];
+  killCharts();
+  const con=document.getElementById('content');
+  con.innerHTML='';
+  con.className='content page-in';
+  ({overview:rOV,carriers:rCA,agents:rAG,ambetter:rAB,insights:rIN})[page]();
+  requestAnimationFrame(()=>initCharts(page));
+}
+
+/* ═══════════════════════════════════════════════════════
+   OVERVIEW
+═══════════════════════════════════════════════════════ */
+function rOV(){
+  const el=document.getElementById('content');
+  const gtL=gt(LATEST), gt0=gt(FIRST);
+  const ambL=ct(LATEST,'Ambetter'), oscL=ct(LATEST,'Oscar'), osc0=ct(FIRST,'Oscar');
+  const share=CARRIERS.map(c=>({name:c,v:ct(LATEST,c)})).sort((a,b)=>b.v-a.v);
+  const total=share.reduce((s,d)=>s+d.v,0);
+  const newTotal=NEW_A.reduce((s,a)=>s+at(LATEST,a),0);
+
+  el.innerHTML=`
+  <div class="g g4 first">
+    <div class="kpi"><div class="kpi-bar" style="background:linear-gradient(90deg,var(--navy),var(--blue))"></div>
+      <div class="kpi-label">Active Members</div><div class="kpi-val">${f(gtL)}</div>
+      <div class="kpi-badge b-amber">▼ ${Math.abs(((gtL-gt0)/gt0*100).toFixed(1))}% since Mar 2</div>
+      <div class="kpi-sub">Peak: ${f(gt0)} on March 2</div></div>
+    <div class="kpi"><div class="kpi-bar" style="background:var(--amb)"></div>
+      <div class="kpi-label">Ambetter</div><div class="kpi-val">${f(ambL)}</div>
+      <div class="kpi-badge b-blue">${((ambL/total)*100).toFixed(1)}% of portfolio</div>
+      <div class="kpi-sub">Stabilized since April 6</div></div>
+    <div class="kpi"><div class="kpi-bar" style="background:var(--osc)"></div>
+      <div class="kpi-label">Oscar</div><div class="kpi-val">${f(oscL)}</div>
+      <div class="kpi-badge b-red">▼ ${Math.abs(((oscL-osc0)/osc0*100).toFixed(1))}% since Mar 2</div>
+      <div class="kpi-sub">Requires carrier review</div></div>
+    <div class="kpi"><div class="kpi-bar" style="background:linear-gradient(90deg,var(--green),#059669)"></div>
+      <div class="kpi-label">Active Agents</div><div class="kpi-val">22</div>
+      <div class="kpi-badge b-green">+${f(newTotal)} from new agents</div>
+      <div class="kpi-sub">16 legacy · 6 new (Ambetter)</div></div>
+  </div>
+  <div class="g g21" style="margin-top:16px">
+    <div class="card"><div class="card-hd">Portfolio Trend — March 2 to April 27</div><div class="card-sub">Weekly active member count across all 22 agents and 5 carriers</div><div style="height:250px"><canvas id="ch-grand"></canvas></div></div>
+    <div class="card"><div class="card-hd">Carrier Mix — April 27</div><div class="card-sub">${f(total)} total active members</div>
+      ${share.map(c=>`<div class="cleg">
+        <div class="cleg-l"><span class="cdot" style="background:${CCLR[c.name]}"></span>${c.name}</div>
+        <div style="display:flex;align-items:center;gap:14px">
+          <div class="cleg-pct">${(c.v/total*100).toFixed(1)}%</div>
+          <div class="cleg-v" style="color:${CCLR[c.name]}">${f(c.v)}</div>
+        </div>
+      </div>`).join('')}
+    </div>
+  </div>
+  <div class="sh"><h2>Carrier Trends — All Snapshots</h2><hr class="rule"></div>
+  <div class="card"><div style="height:250px"><canvas id="ch-carrier-trend"></canvas></div></div>`;
+}
+
+/* ═══════════════════════════════════════════════════════
+   CARRIERS
+═══════════════════════════════════════════════════════ */
+function rCA(){
+  const el=document.getElementById('content');
+  const cdata=CARRIERS.map(c=>({name:c,v0:ct(FIRST,c),vf:ct('04/06',c),vL:ct(LATEST,c)})).map(x=>({...x,chg:x.vL-x.v0,pct:((x.vL-x.v0)/x.v0*100).toFixed(1)}));
+  const sorted=[...cdata].sort((a,b)=>b.vL-a.vL);
+  const gtL=gt(LATEST);
+
+  el.innerHTML=`
+  <div class="g g3">
+    ${CARRIERS.map(c=>{
+      const v0=ct(FIRST,c),vL=ct(LATEST,c),chg=vL-v0,p=((chg/v0)*100).toFixed(1);
+      const topA=ALL_A.slice().sort((a,b)=>(D[LATEST]?.[b]?.[c]||0)-(D[LATEST]?.[a]?.[c]||0))[0];
+      return `<div class="kpi"><div class="kpi-bar" style="background:${CCLR[c]}"></div>
+        <div class="kpi-label">${c}</div><div class="kpi-val">${f(vL)}</div>
+        <div class="kpi-badge ${chg<0?'b-red':'b-green'}">${chg>0?'▲':'▼'} ${Math.abs(p)}%</div>
+        <div class="kpi-sub">Lead: ${topA} · ${((vL/gtL)*100).toFixed(1)}% of portfolio</div></div>`;
+    }).join('')}
+  </div>
+  <div class="sh"><h2>Net Change — March 2 to April 27</h2><hr class="rule"></div>
+  <div class="card">
+    ${cdata.sort((a,b)=>a.chg-b.chg).map(c=>`<div style="display:flex;align-items:center;gap:14px;padding:12px 0;border-bottom:1px solid var(--edge)">
+      <span class="cdot" style="background:${CCLR[c.name]};width:10px;height:10px;flex-shrink:0"></span>
+      <span style="font-weight:700;width:115px;font-size:13px">${c.name}</span>
+      <div style="flex:1;background:var(--s2);border-radius:4px;height:11px;overflow:hidden">
+        <div style="height:100%;border-radius:4px;width:${Math.min(Math.abs(c.chg)/50,100)}%;background:${c.chg<0?'var(--red)':'var(--green)'}"></div>
+      </div>
+      <span style="font-family:'Geist Mono',monospace;font-size:12px;width:64px;text-align:right;font-weight:700;color:${c.chg<0?'var(--red)':'var(--green)'}">${c.chg>0?'+':''}${c.chg}</span>
+      <span style="font-family:'Geist Mono',monospace;font-size:11px;color:var(--txt4);width:52px;text-align:right">${c.pct>0?'+':''}${c.pct}%</span>
+    </div>`).join('')}
+  </div>
+  <div class="sh"><h2>Carrier Breakdown by Agent — April 27</h2><hr class="rule"></div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Agent</th>${CARRIERS.map(c=>`<th style="color:${CCLR[c]}99">${c}</th>`).join('')}<th>Total</th></tr></thead>
+      <tbody>
+        ${ALL_A.slice().sort((a,b)=>at(LATEST,b)-at(LATEST,a)).map(a=>{
+          const isN=NEW_A.includes(a);
+          const tot=at(LATEST,a);
+          return `<tr><td class="td-a">${a}${isN?'<span class="td-new">NEW</span>':''}</td>
+            ${CARRIERS.map(c=>{const v=D[LATEST]?.[a]?.[c]||0;return`<td class="tc">${v>0?f(v):'<span class="td-miss">—</span>'}</td>`}).join('')}
+            <td class="tc" style="font-weight:700;color:var(--navy)">${f(tot)}</td></tr>`;
+        }).join('')}
+        <tr class="tfoot-row">
+          <td class="td-a" style="color:#fff">Total</td>
+          ${CARRIERS.map(c=>`<td class="tc" style="color:#fff">${f(ct(LATEST,c))}</td>`).join('')}
+          <td class="tc" style="color:#fff">${f(gt(LATEST))}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="sh"><h2>Carrier Trends</h2><hr class="rule"></div>
+  <div class="card"><div style="height:260px"><canvas id="ch-carrier-lines"></canvas></div></div>`;
+}
+
+/* ═══════════════════════════════════════════════════════
+   AGENTS
+═══════════════════════════════════════════════════════ */
+function rAG(){
+  const el=document.getElementById('content');
+  el.innerHTML=`
+  <div class="filter-row">
+    <span class="fl">Snapshot</span>
+    <select id="ag-dt">${DATES.map(d=>`<option value="${d}" ${d===LATEST?'selected':''}>${d}</option>`).join('')}</select>
+    <span class="fl" style="margin-left:6px">Compare to</span>
+    <select id="ag-cp">${DATES.map(d=>`<option value="${d}" ${d===FIRST?'selected':''}>${d}</option>`).join('')}</select>
+  </div>
+  <div id="ag-tbl"></div>
+  <div class="sh"><h2>Week-over-Week — Apr 20 to Apr 27</h2><hr class="rule"></div>
+  <div class="wow-grid" id="wow"></div>
+  <div class="sh"><h2>Portfolio Size — April 27</h2><p>Green = stable/growing · Amber = moderate decline · Red = significant decline vs March 2</p><hr class="rule"></div>
+  <div class="card"><div style="height:610px"><canvas id="ch-ab"></canvas></div></div>`;
+
+  const buildTbl=(dt,cp)=>{
+    const sorted=ALL_A.slice().sort((a,b)=>at(dt,b)-at(dt,a));
+    document.getElementById('ag-tbl').innerHTML=`<div class="tbl-wrap"><table>
+      <thead><tr><th>Agent</th>${CARRIERS.map(c=>`<th style="color:${CCLR[c]}99">${c}</th>`).join('')}<th>${dt}</th><th>vs ${cp}</th><th>vs Mar 2</th></tr></thead>
+      <tbody>${sorted.map(a=>{
+        const isN=NEW_A.includes(a);
+        const vN=at(dt,a),vC=at(cp,a)||0,v0=at(FIRST,a)||0;
+        const dC=vN-vC,d0=vN-v0;
+        const pC=vC>0?((dC/vC)*100).toFixed(1):'—';
+        const p0=v0>0?((d0/v0)*100).toFixed(1):'—';
+        return `<tr><td class="td-a">${a}${isN?'<span class="td-new">NEW</span>':''}</td>
+          ${CARRIERS.map(c=>`<td class="tc">${(D[dt]?.[a]?.[c]||0)>0?f(D[dt]?.[a]?.[c]):'<span class="td-miss">—</span>'}</td>`).join('')}
+          <td class="tc" style="font-weight:700">${f(vN)}</td>
+          <td class="tc ${dC<-5?'td-neg':dC>5?'td-pos':'td-flat'}">${dC>0?'+':''}${dC}${vC===0?'<span class="td-new">new</span>':pC!=='—'?` (${dC>0?'+':''}${pC}%)`:''}</td>
+          <td class="tc ${d0<-50?'td-neg':d0>10?'td-pos':'td-flat'}">${d0>0?'+':''}${d0}</td>
+        </tr>`;
+      }).join('')}</tbody></table></div>`;
+  };
+
+  buildTbl(LATEST,'04/24');
+  document.getElementById('ag-dt').onchange=function(){buildTbl(this.value,document.getElementById('ag-cp').value)};
+  document.getElementById('ag-cp').onchange=function(){buildTbl(document.getElementById('ag-dt').value,this.value)};
+
+  const wow=document.getElementById('wow');
+  ALL_A.slice().sort((a,b)=>at(LATEST,b)-at(LATEST,a)).forEach(a=>{
+    const now=at('04/24',a),prev=at('04/23',a)||0,d=now-prev;
+    wow.innerHTML+=`<div class="kpi" style="padding:13px 15px">
+      <div class="kpi-label" style="font-size:9.5px">${a}${NEW_A.includes(a)?'<span class="td-new">N</span>':''}</div>
+      <div style="font-family:'Geist Mono',monospace;font-size:20px;font-weight:700;color:${d<0?'var(--red)':d>0?'var(--green)':'var(--txt4)'}">${d>0?'+':''}${d}</div>
+    </div>`;
+  });
+}
+
+/* ═══════════════════════════════════════════════════════
+   AMBETTER
+═══════════════════════════════════════════════════════ */
+function rAB(){
+  const el=document.getElementById('content');
+  const legPk=lct(FIRST,'Ambetter'), legFl=lct('04/06','Ambetter'), legNow=lct(LATEST,'Ambetter');
+  const totalLost=legPk-legNow;
+  const newAmb=NEW_A.reduce((s,a)=>s+(D[LATEST]?.[a]?.Ambetter||0),0);
+  const losses=LEGACY.map(a=>({name:a,v0:D[FIRST]?.[a]?.Ambetter||0,vL:D[LATEST]?.[a]?.Ambetter||0}))
+    .map(x=>({...x,lost:x.v0-x.vL,pct:((x.v0-x.vL)/x.v0*100).toFixed(1)}))
+    .filter(x=>x.lost>0).sort((a,b)=>b.lost-a.lost);
+  const max=losses[0]?.lost||1;
+  const top4=losses.slice(0,4).reduce((s,x)=>s+x.lost,0);
+
+  el.innerHTML=`
+  <div class="cbox c-navy" style="margin-bottom:18px">
+    <h3>📋 Scope of this analysis</h3>
+    <p>The legacy Ambetter book (16 original agents) declined from <strong>${f(legPk)}</strong> to <strong>${f(legNow)}</strong> between March 2 and April 27. This page isolates where the loss occurred, when it stopped, and the most likely cause.</p>
+  </div>
+  <div class="g g3">
+    <div class="kpi"><div class="kpi-bar" style="background:var(--red)"></div>
+      <div class="kpi-label">Legacy Members Lost</div><div class="kpi-val">${f(totalLost)}</div>
+      <div class="kpi-badge b-red">−${((totalLost/legPk)*100).toFixed(1)}% of peak</div></div>
+    <div class="kpi"><div class="kpi-bar" style="background:var(--amber)"></div>
+      <div class="kpi-label">Top 4 Agents</div><div class="kpi-val">${f(top4)}</div>
+      <div class="kpi-badge b-amber">${((top4/totalLost)*100).toFixed(0)}% of all losses</div>
+      <div class="kpi-sub">Juice · Justin · Mike · Jose Ariza</div></div>
+    <div class="kpi"><div class="kpi-bar" style="background:var(--green)"></div>
+      <div class="kpi-label">New Agent Recovery</div><div class="kpi-val">+${f(newAmb)}</div>
+      <div class="kpi-badge b-green">6 new agents</div>
+      <div class="kpi-sub">Partial offset of legacy loss</div></div>
+  </div>
+  <div class="sh"><h2>Member Loss by Agent — March 2 to April 27</h2><hr class="rule"></div>
+  <div class="card">
+    ${losses.map(x=>`<div class="lbar-row">
+      <div class="lbar-name">${x.name}</div>
+      <div class="lbar-track"><div class="lbar-fill" style="width:${(x.lost/max*100).toFixed(0)}%"></div></div>
+      <div class="lbar-nums"><span class="lbar-pct">−${x.pct}%</span> <span class="lbar-abs">${f(x.v0)} → ${f(x.vL)}</span></div>
+    </div>`).join('')}
+  </div>
+  <div class="sh"><h2>Ambetter Timeline</h2><p>Legacy agents vs new agents by week</p><hr class="rule"></div>
+  <div class="card"><div style="height:260px"><canvas id="ch-amb"></canvas></div></div>
+  <div class="sh"><h2>Root Cause Assessment</h2><hr class="rule"></div>
+  <div class="g g2">
+    <div class="cbox c-amber"><h3>⚠ Most Likely — OEP Grace Period Terminations</h3>
+      <p>Members who enrolled during Open Enrollment (ending Jan 15) but never paid their first premium have a standard 90-day grace period, expiring around April 1. Carriers process these in a single batch. <strong>This matches exactly: all drops before April 6, zero further erosion since.</strong> The book has been flat for 3 weeks.</p></div>
+    <div class="cbox c-blue"><h3>🔍 How to Confirm</h3>
+      <p>Cross-reference the R2 deactivation log against:<br><br>
+      • <strong>Enrollment date</strong> — Jan/Feb enrollments?<br>
+      • <strong>Termination reason</strong> — "non-payment" vs. "voluntary cancel"<br>
+      • <strong>Policy start date</strong> — did coverage ever activate?</p></div>
+  </div>
+  <div class="cbox c-green">
+    <h3>✓ The Good News</h3>
+    <p>Legacy Ambetter has been flat since April 6 at ~${f(legNow)} members. With 6 new agents adding ${f(newAmb)} members, total Ambetter stands at <strong>${f(ct(LATEST,'Ambetter'))}</strong>. If the OEP theory is confirmed, no further structural drops are expected this cycle.</p>
+  </div>
+  <div class="sh"><h2>Data Quality</h2><hr class="rule"></div>
+  <div class="card">
+    <div class="dq-row">
+      ${["03/02","03/06","03/09","03/20","03/23","03/27","03/30","04/01","04/06","04/10","04/13","04/17","04/20","04/23","04/24","04/27"].map(d=>{
+        const cls=d==='03/13'?'dq-x':['04/01','04/10'].includes(d)?'dq-p':'dq-ok';
+        const sym=d==='03/13'?'✗':['04/01','04/10'].includes(d)?'⚡':'✓';
+        return `<div class="dq-chip ${cls}">${d} ${sym}</div>`;
+      }).join('')}
+    </div>
+    <div style="margin-top:8px;font-size:11.5px;color:var(--txt4)">✓ Complete &nbsp;·&nbsp; ⚡ UHC filled via carry-forward &nbsp;·&nbsp; ✗ No data</div>
+  </div>`;
+}
+
+/* ═══════════════════════════════════════════════════════
+   INSIGHTS
+═══════════════════════════════════════════════════════ */
+function rIN(){
+  const el=document.getElementById('content');
+  const gtL=gt(LATEST), gt0=gt(FIRST);
+  const legNow=LEGACY.reduce((s,a)=>s+at(LATEST,a),0);
+  const newNow=NEW_A.reduce((s,a)=>s+at(LATEST,a),0);
+
+  el.innerHTML=`
+  <div class="cbox c-navy">
+    <h3>📊 Daily Snapshot — April 27, 2026</h3>
+    <p>Portfolio at <strong>${f(gtL)}</strong> active members (22 agents, 5 carriers). Up <strong style="color:var(--green)">+${f(gtL-gt('04/23'))}</strong> from yesterday. Note: Luis Sosa's Oscar value was null in today's sheet — <strong>carried forward from April 23 (377 members)</strong> to avoid false churn signal. The adjusted total reflects the most accurate available data.</p>
+  </div>
+  <div class="g g2" style="margin-top:4px">
+    <div class="cbox c-green">
+      <h3>📈 Today's Winners</h3>
+      <p><strong>Mike Lavernia</strong> gained <strong>+30 members</strong> (Oscar +3, UHC +27) and has now overtaken Justin for #2 spot on active members. <strong>New agents accelerating:</strong> Aaron Durante +25 (now 99 total), Kirsten Cuevas +21 (now 146), Michael Ortiz +12 (now 195). Osmayra and Juice held flat — strong retention signals.</p>
+    </div>
+    <div class="cbox c-amber">
+      <h3>⚑ Data Quality Flag — Luis Sosa Oscar</h3>
+      <p>Luis Sosa's Oscar column was blank in today's Excel sheet (showed as null → 0). This is a <strong>recurring portal data gap</strong>, not a member loss. His Oscar count has been carried forward at <strong>377</strong> from April 23. Please verify in the portal and update tomorrow's entry. This issue has occurred on 04/01 and 04/10 as well.</p>
+    </div>
+  </div>
+  <div class="cbox c-navy" style="margin-top:4px">
+    <h3>📊 The March → April Arc (Full Picture)</h3>
+    <p style="margin-top:0">
+    • <strong>March 2</strong>: ${f(gt('03/02'))} members — 16 agents, all-time peak<br>
+    • <strong>March 30</strong>: ${f(gt('03/30'))} members — gradual OEP attrition (−7.3%)<br>
+    • <strong>April 6</strong>: ${f(gt('04/06'))} members — structural floor after OEP cancellation batch<br>
+    • <strong>April 23</strong>: ${f(gt('04/23'))} members — stabilized, new agents fully ramping<br>
+    • <strong>April 27</strong>: ${f(gtL)} members — <strong style="color:var(--green)">growing</strong>, 22 agents, daily cadence begins
+    </p>
+  </div>
+  <div class="sh"><h2>Retention Leaders</h2><p>Agents who significantly outperformed during the April contraction</p><hr class="rule"></div>
+  <div class="g g3">
+    ${[
+      {n:'Osmayra Vega',from:at('03/30','Osmayra Vega'),to:at(LATEST,'Osmayra Vega'),note:'Holding flat today (0 net change). Best retention rate on the team across the full March–April period. The benchmark for the team.'},
+      {n:'Michael Lavernia',from:at('03/30','Michael Lavernia'),to:at(LATEST,'Michael Lavernia'),note:'Best mover today: +30 members. UHC surged +27. Now #2 ranked agent at 1,378 members, overtaking Justin.'},
+      {n:'Luis Sosa',from:at('03/30','Luis Sosa'),to:at(LATEST,'Luis Sosa'),note:'Oscar null in today\'s sheet — carried forward at 377. Net gain of +9 (Ambetter +1, UHC +9). Remains #1 or #3 depending on Oscar resolution.'},
+    ].map(x=>{const d=x.to-x.from,p=x.from>0?((d/x.from)*100).toFixed(1):'—';return `<div class="card">
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.8px;font-weight:700;color:var(--green);margin-bottom:7px">⭐ Retention Leader</div>
+      <div style="font-size:15px;font-weight:700;color:var(--navy);margin-bottom:3px">${x.n}</div>
+      <div style="font-family:'Geist Mono',monospace;font-size:12px;color:${d<0?'var(--red)':'var(--green)'};font-weight:700;margin-bottom:10px">${d>0?'+':''}${d}${p!=='—'?' ('+( d>0?'+':'')+p+'%)':''} vs Mar 30</div>
+      <div style="font-size:12px;color:var(--txt3);line-height:1.65">${x.note}</div>
+    </div>`}).join('')}
+  </div>
+  <div class="sh"><h2>New Agent Ramp — April 27</h2><hr class="rule"></div>
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>Agent</th><th>Apr 20</th><th>Apr 23</th><th>Apr 27</th><th>Day Δ</th><th>Ambetter</th><th>Oscar</th><th>UHC</th></tr></thead>
+    <tbody>
+    ${NEW_A.map(a=>{
+      const t20=at('04/20',a),t23=at('04/23',a),t24=at(LATEST,a),d=t24-t23;
+      const amb=D[LATEST]?.[a]?.Ambetter||0, osc=D[LATEST]?.[a]?.Oscar||0, uhc=D[LATEST]?.[a]?.['United HC']||0;
+      return `<tr><td class="td-a">${a}</td>
+        <td class="tc">${f(t20)}</td><td class="tc">${f(t23)}</td><td class="tc" style="font-weight:700">${f(t24)}</td>
+        <td class="tc ${d>0?'td-pos':d<0?'td-neg':'td-flat'}">${d>0?'+':''}${d}</td>
+        <td class="tc">${f(amb)}</td>
+        <td class="tc">${osc>0?f(osc):'<span class="td-miss">—</span>'}</td>
+        <td class="tc">${uhc>0?f(uhc):'<span class="td-miss">—</span>'}</td>
+      </tr>`;
+    }).join('')}
+    </tbody>
+  </table></div>
+  <div class="sh"><h2>Action Plan</h2><hr class="rule"></div>
+  <div class="actions-grid">
+    ${[
+      {icon:'🔎',p:'p-u',pc:'URGENT',bc:'var(--red)',t:'Fix Luis Sosa Oscar Data Gap',b:'Oscar null in today\'s sheet for Luis Sosa — this is the 3rd occurrence (also 04/01, 04/10). Pull his actual Oscar count from the portal and update tomorrow\'s entry. Consider a validation check in the bot to flag null Oscar values for agents with known Oscar books.'},
+      {icon:'🤝',p:'p-u',pc:'URGENT',bc:'var(--red)',t:'Oscar Carrier Meeting',b:'Oscar lost 34% since March 2 (3,393 → 2,327). Schedule a formal carrier review covering plan competitiveness, network adequacy, and member satisfaction.'},
+      {icon:'⭐',p:'p-h',pc:'HIGH',bc:'var(--amber)',t:"Document Mike Lavernia's UHC Growth",b:'Mike gained +27 UHC members today — the single largest daily gain on the team. This mirrors Osmayra\'s retention pattern. Document what\'s driving this before the next reporting cycle.'},
+      {icon:'🚀',p:'p-h',pc:'HIGH',bc:'var(--amber)',t:'Accelerate New Agent Carrier Expansion',b:'Aaron Durante hit 99 total today (+25). Kirsten Cuevas at 146 (+21). Both are expanding into Oscar. Michael Ortiz at 195 remains Ambetter-only — certify him on Oscar or Molina this week.'},
+      {icon:'📊',p:'p-m',pc:'MEDIUM',bc:'var(--blue)',t:'Daily Reporting → Automation',b:'Now that we\'re running daily, manual Excel entry is a bottleneck. Prioritize the Sheets automation pipeline so the bots write directly and this dashboard updates without manual intervention.'},
+      {icon:'🎯',p:'p-m',pc:'MEDIUM',bc:'var(--blue)',t:'Validate Ambetter OEP Losses',b:'Cross-reference the 1,758 Ambetter deactivations in the R2 log. Confirm OEP first-payment-default vs. voluntary cancel before any corrective action. Results determine the AEP 2026 win-back strategy.'},
+    ].map(x=>`<div class="acard" style="border-left-color:${x.bc}">
+      <div class="pri ${x.p}">${x.pc}</div>
+      <div class="icon">${x.icon}</div>
+      <h4>${x.t}</h4>
+      <p>${x.b}</p>
+    </div>`).join('')}
+  </div>`;
+}
+
+/* ═══════════════════════════════════════════════════════
+   CHART INIT
+═══════════════════════════════════════════════════════ */
+function initCharts(page){
+  const valid=DATES.filter(d=>d!=='03/13');
+  if(page==='overview'){
+    CHS.grand=new Chart(document.getElementById('ch-grand'),{type:'line',data:{labels:valid,datasets:[{
+      label:'All Agents',data:valid.map(d=>gt(d)),
+      borderColor:'#17243E',backgroundColor:'rgba(23,36,62,.05)',fill:true,tension:.35,
+      pointRadius:valid.map(d=>['04/01','04/10'].includes(d)?5:4),
+      pointBackgroundColor:valid.map(d=>['04/01','04/10'].includes(d)?'#B45309':'#17243E'),
+      pointBorderColor:'#fff',pointBorderWidth:2,borderWidth:2.5
+    }]},options:{...CD,responsive:true,maintainAspectRatio:false,scales:{...CD.scales,y:{...CD.scales.y,min:9500}}}});
+    CHS.ct=new Chart(document.getElementById('ch-carrier-trend'),{type:'line',data:{labels:valid,datasets:CARRIERS.map(c=>({
+      label:c,data:valid.map(d=>ct(d,c)),borderColor:CCLR[c],tension:.35,
+      pointRadius:3,pointBackgroundColor:CCLR[c],pointBorderColor:'#fff',pointBorderWidth:1.5,borderWidth:2
+    }))},options:{...CD,responsive:true,maintainAspectRatio:false}});
+  }
+  if(page==='carriers'){
+    CHS.cl=new Chart(document.getElementById('ch-carrier-lines'),{type:'line',data:{labels:valid,datasets:CARRIERS.map(c=>({
+      label:c,data:valid.map(d=>ct(d,c)),borderColor:CCLR[c],tension:.35,
+      pointRadius:3,pointBackgroundColor:CCLR[c],pointBorderColor:'#fff',pointBorderWidth:1.5,borderWidth:2
+    }))},options:{...CD,responsive:true,maintainAspectRatio:false}});
+  }
+  if(page==='agents'){
+    const sorted=ALL_A.slice().sort((a,b)=>at(LATEST,b)-at(LATEST,a));
+    const bclr=sorted.map(a=>{
+      if(NEW_A.includes(a))return'#2A5FBF';
+      const d=at(LATEST,a)-at(FIRST,a);
+      return d>0?'#0A7A52':d<-100?'#C0272D':'#B45309';
+    });
+    CHS.ab=new Chart(document.getElementById('ch-ab'),{type:'bar',data:{labels:sorted,datasets:[{
+      label:'Members',data:sorted.map(a=>at(LATEST,a)),
+      backgroundColor:bclr,borderRadius:4,barPercentage:.75
+    }]},options:{...CD,responsive:true,maintainAspectRatio:false,indexAxis:'y',
+      plugins:{...CD.plugins,legend:{display:false}}}});
+  }
+  if(page==='ambetter'){
+    CHS.amb=new Chart(document.getElementById('ch-amb'),{type:'line',data:{labels:valid,datasets:[
+      {label:'Legacy Agents',data:valid.map(d=>lct(d,'Ambetter')),borderColor:'#2A5FBF',backgroundColor:'rgba(42,95,191,.06)',fill:true,tension:.35,pointRadius:4,pointBackgroundColor:'#2A5FBF',pointBorderColor:'#fff',pointBorderWidth:2,borderWidth:2.5},
+      {label:'New Agents',data:valid.map(d=>NEW_A.reduce((s,a)=>s+(D[d]?.[a]?.Ambetter||0),0)),borderColor:'#0A7A52',backgroundColor:'rgba(10,122,82,.05)',fill:true,tension:.35,pointRadius:4,borderWidth:2,borderDash:[5,4]}
+    ]},options:{...CD,responsive:true,maintainAspectRatio:false,scales:{...CD.scales,y:{...CD.scales.y,min:0}}}});
+  }
+}
+
+/* ═══════════════════════════════════════════════════════
+   DASHBOARD INIT
+═══════════════════════════════════════════════════════ */
+async function startDashboard(){
+  try{
+    const resp=await fetch('dashboard_data.json');
+    if(!resp.ok)throw new Error('HTTP '+resp.status);
+    const data=await resp.json();
+    DATES=data.dates;
+    D=data.D;
+    LATEST=data.meta.latest_date;
+    FIRST=data.meta.first_date;
+    CARRIERS=data.carriers;
+    rOV();
+    requestAnimationFrame(()=>initCharts('overview'));
+    setTimeout(()=>{
+      document.getElementById('loader').classList.add('done');
+      document.getElementById('shell').classList.add('visible');
+      document.body.classList.add('ready');
+    },2600);
+  }catch(e){
+    document.getElementById('loader').insertAdjacentHTML('beforeend',
+      '<div style="color:#F5AAAC;margin-top:24px;font-size:13px;letter-spacing:1px;font-family:Outfit,sans-serif">Failed to load data: '+e.message+'<br><span style="font-size:11px;opacity:.6">Serve via a local web server (python -m http.server) or deploy to Vercel.</span></div>');
+  }
+}
+
+window.addEventListener('load',async()=>{
+  if(sessionStorage.getItem('auth')==='1'){
+    startDashboard();
+    return;
+  }
+  const gate=document.getElementById('gate');
+  gate.style.display='flex';
+  setTimeout(()=>document.getElementById('gate-input').focus(),50);
+  document.getElementById('gate-form').onsubmit=async e=>{
+    e.preventDefault();
+    const h=await sha256(document.getElementById('gate-input').value);
+    if(h===PASSWORD_HASH){
+      sessionStorage.setItem('auth','1');
+      gate.style.display='none';
+      startDashboard();
+    }else{
+      const inp=document.getElementById('gate-input');
+      inp.classList.add('shake');
+      inp.value='';
+      setTimeout(()=>inp.classList.remove('shake'),600);
+    }
+  };
+});
+</script>
+</body>
+</html>

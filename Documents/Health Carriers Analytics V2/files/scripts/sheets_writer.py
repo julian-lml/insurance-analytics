@@ -21,7 +21,7 @@ only after the operator has verified all carrier XLSX files for the day.
 Env vars (.env):
     GOOGLE_SERVICE_ACCOUNT_JSON  service account JSON (default: credentials/service_account.json)
     DRIVE_FOLDER_ID              Drive folder that receives monthly sheets
-    SHEET_ID_{MONTH}_{YEAR}      pin an existing sheet ID (e.g. SHEET_ID_APRIL_2026=…)
+    SHEET_ID_{YEAR}              pin an existing sheet ID (e.g. SHEET_ID_2026=…)
 
 Standalone usage:
     python scripts/sheets_writer.py             # push live
@@ -31,6 +31,7 @@ Standalone usage:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import sys
@@ -76,8 +77,15 @@ R2_HEADERS = [
     "member_dob", "state", "coverage_end_date", "policy_number",
 ]
 
+R3_HEADERS = [
+    "run_date", "carrier", "agent_name",
+    "member_first_name", "member_last_name", "member_dob",
+    "state", "policy_number", "plan_name", "coverage_start_date", "policy_status",
+]
+
 OUTPUT_DIR = ROOT / "data" / "output"
 R2_XLSX    = OUTPUT_DIR / "deactivated_members.xlsx"
+R3_XLSX    = OUTPUT_DIR / "active_members_all.xlsx"
 
 
 # ─── XLSX readers ─────────────────────────────────────────────────────────────
@@ -109,6 +117,16 @@ def _read_r2_from_disk() -> list[dict]:
         return []
     df = pd.read_excel(R2_XLSX, engine="openpyxl")
     log.info("R2 loaded: %d rows from %s", len(df), R2_XLSX.name)
+    return df.to_dict(orient="records")
+
+
+def _read_r3_from_disk() -> list[dict]:
+    """Load every row from data/output/active_members_all.xlsx for roster push."""
+    if not R3_XLSX.exists():
+        log.warning("R3 XLSX missing — %s (run --mode roster first)", R3_XLSX.name)
+        return []
+    df = pd.read_excel(R3_XLSX, engine="openpyxl")
+    log.info("R3 loaded: %d rows from %s", len(df), R3_XLSX.name)
     return df.to_dict(orient="records")
 
 
@@ -255,8 +273,7 @@ def get_or_create_month_sheet(year: int, month: int) -> str:
       2. Drive folder search — finds existing sheet by name.
       3. Drive file create — creates sheet with 3 tabs + headers.
     """
-    month_name = date(year, month, 1).strftime("%B").upper()
-    env_key = f"SHEET_ID_{month_name}_{year}"
+    env_key = f"SHEET_ID_{year}"
     pinned_id = os.getenv(env_key, "").strip()
     if pinned_id:
         log.info(f"Using pinned sheet ID from env {env_key}={pinned_id}")
@@ -474,31 +491,179 @@ def append_r1_log(r1_records: list[dict], sheet_id: str) -> None:
     log.info(f"append_r1_log: {len(rows)} rows written (sheet={sheet_id})")
 
 
+# ─── Roster tab push (overwrite — point-in-time snapshot) ────────────────────
+
+def _roster_tab_name(year: int, month: int) -> str:
+    """'Active Roster – April 2026', etc."""
+    return "Active Roster – " + date(year, month, 1).strftime("%B %Y")
+
+
+def push_roster_tab(r3_records: list[dict], sheet_id: str) -> None:
+    """
+    Overwrite the 'Active Roster – {Month} {Year}' tab with current R3 data.
+    Creates the tab if it does not exist. Point-in-time snapshot — never appended.
+    """
+    if not r3_records:
+        log.warning("push_roster_tab: no R3 records — nothing written")
+        return
+
+    today    = date.today()
+    tab_name = _roster_tab_name(today.year, today.month)
+    sheets, _ = _get_services()
+
+    # Ensure the tab exists — create it if not
+    meta   = sheets.spreadsheets().get(spreadsheetId=sheet_id).execute()
+    titles = [s["properties"]["title"] for s in meta.get("sheets", [])]
+    if tab_name not in titles:
+        sheets.spreadsheets().batchUpdate(
+            spreadsheetId=sheet_id,
+            body={"requests": [{"addSheet": {"properties": {"title": tab_name}}}]},
+        ).execute()
+        log.info("push_roster_tab: created tab '%s'", tab_name)
+
+    # Overwrite: clear then write headers + data
+    sheets.spreadsheets().values().clear(
+        spreadsheetId=sheet_id,
+        range=f"'{tab_name}'!A:Z",
+    ).execute()
+
+    rows = [R3_HEADERS] + _records_to_rows(r3_records, R3_HEADERS)
+    sheets.spreadsheets().values().update(
+        spreadsheetId=sheet_id,
+        range=f"'{tab_name}'!A1",
+        valueInputOption="RAW",
+        body={"values": rows},
+    ).execute()
+
+    carrier_counts = {}
+    for r in r3_records:
+        carrier_counts[r.get("carrier", "?")] = carrier_counts.get(r.get("carrier", "?"), 0) + 1
+
+    log.info(
+        "push_roster_tab: wrote %d rows to '%s' — carriers: %s",
+        len(r3_records), tab_name, carrier_counts,
+    )
+
+
+# ─── Dashboard JSON export ───────────────────────────────────────────────────
+
+def export_dashboard_json(r1_records: list[dict]) -> None:
+    """
+    Merge new R1 records into dashboard/dashboard_data.json.
+    Loads existing file (history), updates with new records, writes back.
+    Runs in both live and dry-run modes — local file write only, no Sheets API.
+    """
+    CARRIER_NAMES = ["Ambetter", "Cigna", "Molina", "Oscar", "United HC"]
+    DASH_DIR = ROOT / "dashboard"
+    DASH_DIR.mkdir(exist_ok=True)
+    out_path = DASH_DIR / "dashboard_data.json"
+
+    if out_path.exists():
+        with out_path.open(encoding="utf-8") as fh:
+            existing = json.load(fh)
+    else:
+        existing = {
+            "meta": {"generated": "", "first_date": "", "latest_date": "",
+                     "total_dates": 0, "total_agents": 0, "carriers": CARRIER_NAMES},
+            "dates": [], "run_types": {}, "agents": [],
+            "carriers": CARRIER_NAMES, "D": {},
+        }
+
+    D_out = existing.get("D", {})
+    rt_out = existing.get("run_types", {})
+
+    for rec in r1_records:
+        if rec.get("status") != "success":
+            continue
+        count = int(rec.get("active_members") or 0)
+        if count <= 0:
+            continue
+        try:
+            ds = str(rec.get("run_date", ""))[:10]
+            d_obj = date.fromisoformat(ds)
+            date_key = f"{d_obj.month:02d}/{d_obj.day:02d}"
+        except Exception:
+            continue
+        agent   = str(rec.get("agent_name", "")).strip()
+        carrier = str(rec.get("carrier",    "")).strip()
+        run_type = str(rec.get("run_type",  "Manual")).strip()
+        if not agent or not carrier:
+            continue
+        D_out.setdefault(date_key, {}).setdefault(agent, {})[carrier] = count
+        rt_out[date_key] = run_type
+
+    all_dates  = sorted(D_out.keys())
+    all_agents = sorted({a for d in D_out.values() for a in d})
+
+    payload = {
+        "meta": {
+            "generated":   str(date.today()),
+            "first_date":  all_dates[0]  if all_dates else "",
+            "latest_date": all_dates[-1] if all_dates else "",
+            "total_dates":  len(all_dates),
+            "total_agents": len(all_agents),
+            "carriers": CARRIER_NAMES,
+        },
+        "dates":     all_dates,
+        "run_types": {k: rt_out[k] for k in sorted(rt_out)},
+        "agents":    all_agents,
+        "carriers":  CARRIER_NAMES,
+        "D":         {k: D_out[k] for k in all_dates},
+    }
+
+    with out_path.open("w", encoding="utf-8") as fh:
+        json.dump(payload, fh, indent=2)
+
+    log.info(
+        "dashboard_data.json exported -> dashboard/dashboard_data.json (%d dates, %d agents)",
+        len(all_dates), len(all_agents),
+    )
+
+
 # ─── Top-level entry point ────────────────────────────────────────────────────
 
-def push_to_sheets(dry_run: bool = False) -> None:
+def push_to_sheets(dry_run: bool = False, mode: str = "regular") -> None:
     """
-    Read carrier XLSX files from disk, push to Google Sheets.
+    Read XLSX files from disk, push to Google Sheets.
 
-    Flow:
-        _read_r1_from_disk         → list of R1 dicts (all carriers)
-        _read_r2_from_disk         → list of R2 dicts (deactivated_members.xlsx)
-        get_or_create_month_sheet  → sheet_id
-        write_summary              → overwrites Summary tab
-        append_deactivated         → appends net-new R2 to Deactivated This Period
-        append_r1_log              → appends R1 audit trail to Active Members
+    mode='regular' (default):
+        Reads carrier R1 XLSX + deactivated_members.xlsx (R2).
+        Overwrites Summary tab, appends Deactivated and Active Members tabs.
 
-    Step 2 of the two-step operator flow (bots → XLSX → Sheets). Never called
-    automatically by bots; the launcher's [Push to Sheets] button invokes it.
+    mode='roster':
+        Reads active_members_all.xlsx (R3).
+        Overwrites 'Active Roster – {Month} {Year}' tab (point-in-time snapshot).
+
+    Never called by bots. Launcher buttons invoke it.
     """
     global log
     log = setup_logging("SHEETS")
 
+    today    = date.today()
+    sheet_id = get_or_create_month_sheet(today.year, today.month)
+
+    if mode == "roster":
+        r3_records = _read_r3_from_disk()
+        tab_name   = _roster_tab_name(today.year, today.month)
+        if dry_run:
+            log.info("DRY RUN (roster) — Sheets write skipped")
+            log.info("  sheet target:           '%s' (id=%s)", _month_sheet_name(today.year, today.month), sheet_id)
+            log.info("  would overwrite tab:    '%s'", tab_name)
+            log.info("  would write R3 records: %d", len(r3_records))
+            carrier_counts = {}
+            for r in r3_records:
+                carrier_counts[r.get("carrier", "?")] = carrier_counts.get(r.get("carrier", "?"), 0) + 1
+            log.info("  carrier breakdown:      %s", carrier_counts)
+            export_dashboard_json(_read_r1_from_disk())
+            return
+        push_roster_tab(r3_records, sheet_id)
+        export_dashboard_json(_read_r1_from_disk())
+        log.info("push_to_sheets (roster) complete")
+        return
+
+    # Regular mode
     r1_records = _read_r1_from_disk()
     r2_records = _read_r2_from_disk()
-
-    today = date.today()
-    sheet_id = get_or_create_month_sheet(today.year, today.month)
 
     if dry_run:
         log.info("DRY RUN — all Sheets writes skipped")
@@ -506,11 +671,13 @@ def push_to_sheets(dry_run: bool = False) -> None:
         log.info(f"  would write_summary:      {len(r1_records)} R1 records")
         log.info(f"  would append_deactivated: {len(r2_records)} R2 records")
         log.info(f"  would append_r1_log:      {len(r1_records)} R1 records")
+        export_dashboard_json(r1_records)
         return
 
     write_summary(r1_records, sheet_id)
     append_deactivated(r2_records, sheet_id)
     append_r1_log(r1_records, sheet_id)
+    export_dashboard_json(r1_records)
     log.info("push_to_sheets complete")
 
 
@@ -527,11 +694,13 @@ if __name__ == "__main__":
             "  python scripts/sheets_writer.py --dry-run\n"
             "    → log what would be written, no API writes\n\n"
             "env vars required (.env):\n"
-            "  SHEET_ID_APRIL_2026   (or DRIVE_FOLDER_ID if not pinning)\n"
+            "  SHEET_ID_2026         (or DRIVE_FOLDER_ID if not pinning)\n"
             "  GOOGLE_SERVICE_ACCOUNT_JSON\n"
         ),
     )
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--mode", choices=["regular", "roster"], default="regular",
+                        help="regular: push R1+R2 | roster: overwrite Active Roster tab")
     args = parser.parse_args()
 
-    push_to_sheets(dry_run=args.dry_run)
+    push_to_sheets(dry_run=args.dry_run, mode=args.mode)

@@ -1,0 +1,1982 @@
+{
+  "meta": {
+    "generated": "2026-04-30",
+    "first_date": "03/02",
+    "latest_date": "04/29",
+    "total_dates": 17,
+    "total_agents": 26,
+    "carriers": [
+      "Ambetter",
+      "Cigna",
+      "Molina",
+      "Oscar",
+      "United HC"
+    ]
+  },
+  "dates": [
+    "03/02",
+    "03/06",
+    "03/09",
+    "03/20",
+    "03/23",
+    "03/27",
+    "03/30",
+    "04/01",
+    "04/06",
+    "04/10",
+    "04/13",
+    "04/17",
+    "04/20",
+    "04/23",
+    "04/24",
+    "04/27",
+    "04/29"
+  ],
+  "run_types": {
+    "03/02": "Monday",
+    "03/06": "Friday",
+    "03/09": "Monday",
+    "03/20": "Friday",
+    "03/23": "Monday",
+    "03/27": "Friday",
+    "03/30": "Monday",
+    "04/01": "Wednesday",
+    "04/06": "Monday",
+    "04/10": "Friday",
+    "04/13": "Monday",
+    "04/17": "Friday",
+    "04/20": "Monday",
+    "04/23": "Thursday",
+    "04/24": "Friday",
+    "04/27": "Monday",
+    "04/29": "Manual"
+  },
+  "agents": [
+    "Aaron Duarte",
+    "Anthony Montenegro",
+    "Brandon Kaplan",
+    "Danielle Attias",
+    "Felipe Ramirez",
+    "Jonathan Diaz",
+    "Jose Ariza",
+    "Jose Lares",
+    "Juan Dedios Gallegos Jr",
+    "Juan Gallegos",
+    "Justin Santa",
+    "Kerry St Germain",
+    "Kirsten Cuevas",
+    "Layla Espinel",
+    "Leysi Espinel",
+    "Luis Sosa",
+    "Luis Sossa",
+    "Michael Lavernia",
+    "Michael Ortiz",
+    "Nicholas Cuevas",
+    "Osmayra Vega",
+    "Ruddy Arteaga",
+    "Ruddy Arteaga Bascope",
+    "Ruddy Ortega",
+    "Yusbell",
+    "Yusbell Ortega"
+  ],
+  "carriers": [
+    "Ambetter",
+    "Cigna",
+    "Molina",
+    "Oscar",
+    "United HC"
+  ],
+  "D": {
+    "03/02": {
+      "Anthony Montenegro": {
+        "Ambetter": 211,
+        "Cigna": 29,
+        "Molina": 32,
+        "Oscar": 106,
+        "United HC": 54
+      },
+      "Brandon Kaplan": {
+        "Ambetter": 96,
+        "Molina": 6,
+        "Oscar": 16,
+        "United HC": 22
+      },
+      "Felipe Ramirez": {
+        "Ambetter": 478,
+        "Cigna": 73,
+        "Molina": 58,
+        "Oscar": 176,
+        "United HC": 227
+      },
+      "Jonathan Diaz": {
+        "Ambetter": 167,
+        "Cigna": 79,
+        "Molina": 35,
+        "Oscar": 51,
+        "United HC": 79
+      },
+      "Jose Ariza": {
+        "Ambetter": 635,
+        "Cigna": 6,
+        "Molina": 101,
+        "United HC": 64
+      },
+      "Jose Lares": {
+        "Ambetter": 66,
+        "Cigna": 10,
+        "Oscar": 22
+      },
+      "Juan Gallegos": {
+        "Ambetter": 541,
+        "Cigna": 18,
+        "Molina": 41,
+        "Oscar": 284,
+        "United HC": 155
+      },
+      "Justin Santa": {
+        "Ambetter": 801,
+        "Cigna": 50,
+        "Molina": 24,
+        "Oscar": 633,
+        "United HC": 163
+      },
+      "Kerry St Germain": {
+        "Ambetter": 219,
+        "Molina": 64,
+        "Oscar": 131
+      },
+      "Layla Espinel": {
+        "Ambetter": 127,
+        "Cigna": 10,
+        "Molina": 15,
+        "Oscar": 23,
+        "United HC": 27
+      },
+      "Leysi Espinel": {
+        "Ambetter": 410,
+        "Cigna": 25,
+        "Molina": 154,
+        "Oscar": 546
+      },
+      "Luis Sosa": {
+        "Ambetter": 779,
+        "Cigna": 66,
+        "Molina": 111,
+        "Oscar": 409,
+        "United HC": 265
+      },
+      "Michael Lavernia": {
+        "Ambetter": 868,
+        "Cigna": 106,
+        "Molina": 36,
+        "Oscar": 323,
+        "United HC": 121
+      },
+      "Osmayra Vega": {
+        "Ambetter": 580,
+        "Molina": 76,
+        "Oscar": 378,
+        "United HC": 255
+      },
+      "Ruddy Arteaga": {
+        "Ambetter": 164,
+        "Cigna": 41,
+        "Molina": 33,
+        "Oscar": 43,
+        "United HC": 88
+      },
+      "Yusbell Ortega": {
+        "Ambetter": 976,
+        "Cigna": 51,
+        "Oscar": 252,
+        "United HC": 256
+      }
+    },
+    "03/06": {
+      "Anthony Montenegro": {
+        "Ambetter": 210,
+        "Cigna": 29,
+        "Molina": 36,
+        "Oscar": 103,
+        "United HC": 53
+      },
+      "Brandon Kaplan": {
+        "Ambetter": 96,
+        "Molina": 6,
+        "Oscar": 16,
+        "United HC": 21
+      },
+      "Felipe Ramirez": {
+        "Ambetter": 471,
+        "Cigna": 72,
+        "Molina": 58,
+        "Oscar": 174,
+        "United HC": 219
+      },
+      "Jonathan Diaz": {
+        "Ambetter": 167,
+        "Cigna": 78,
+        "Molina": 35,
+        "Oscar": 51,
+        "United HC": 79
+      },
+      "Jose Ariza": {
+        "Ambetter": 623,
+        "Cigna": 6,
+        "Molina": 101,
+        "United HC": 64
+      },
+      "Jose Lares": {
+        "Ambetter": 63,
+        "Cigna": 11,
+        "Molina": 6,
+        "Oscar": 22
+      },
+      "Juan Gallegos": {
+        "Ambetter": 530,
+        "Cigna": 18,
+        "Molina": 43,
+        "United HC": 152
+      },
+      "Justin Santa": {
+        "Ambetter": 767,
+        "Cigna": 49,
+        "Molina": 24,
+        "Oscar": 618,
+        "United HC": 162
+      },
+      "Kerry St Germain": {
+        "Ambetter": 218,
+        "Molina": 62,
+        "Oscar": 129
+      },
+      "Layla Espinel": {
+        "Ambetter": 126,
+        "Cigna": 10,
+        "Molina": 15,
+        "Oscar": 23,
+        "United HC": 26
+      },
+      "Leysi Espinel": {
+        "Ambetter": 406,
+        "Cigna": 25,
+        "Molina": 152,
+        "Oscar": 540
+      },
+      "Luis Sosa": {
+        "Ambetter": 770,
+        "Cigna": 65,
+        "Molina": 110,
+        "Oscar": 405,
+        "United HC": 261
+      },
+      "Michael Lavernia": {
+        "Ambetter": 801,
+        "Cigna": 107,
+        "Molina": 34,
+        "Oscar": 325,
+        "United HC": 120
+      },
+      "Osmayra Vega": {
+        "Ambetter": 573,
+        "Molina": 80,
+        "Oscar": 374,
+        "United HC": 246
+      },
+      "Ruddy Arteaga": {
+        "Ambetter": 162,
+        "Cigna": 41,
+        "Molina": 33,
+        "Oscar": 43,
+        "United HC": 88
+      },
+      "Yusbell Ortega": {
+        "Ambetter": 929,
+        "Cigna": 50,
+        "Oscar": 247,
+        "United HC": 244
+      }
+    },
+    "03/09": {
+      "Anthony Montenegro": {
+        "Ambetter": 210,
+        "Cigna": 29,
+        "Molina": 32,
+        "Oscar": 103,
+        "United HC": 53
+      },
+      "Brandon Kaplan": {
+        "Ambetter": 97,
+        "Molina": 6,
+        "Oscar": 16,
+        "United HC": 21
+      },
+      "Felipe Ramirez": {
+        "Ambetter": 468,
+        "Cigna": 72,
+        "Molina": 57,
+        "Oscar": 172,
+        "United HC": 222
+      },
+      "Jonathan Diaz": {
+        "Ambetter": 170,
+        "Cigna": 78,
+        "Molina": 35,
+        "Oscar": 51,
+        "United HC": 79
+      },
+      "Jose Ariza": {
+        "Ambetter": 618,
+        "Cigna": 6,
+        "Molina": 101,
+        "United HC": 64
+      },
+      "Jose Lares": {
+        "Ambetter": 63,
+        "Cigna": 11,
+        "Molina": 6,
+        "Oscar": 22
+      },
+      "Juan Gallegos": {
+        "Ambetter": 531,
+        "Cigna": 18,
+        "Molina": 41,
+        "United HC": 152
+      },
+      "Justin Santa": {
+        "Ambetter": 764,
+        "Cigna": 49,
+        "Molina": 24,
+        "Oscar": 615,
+        "United HC": 161
+      },
+      "Kerry St Germain": {
+        "Ambetter": 216,
+        "Molina": 62,
+        "Oscar": 129
+      },
+      "Layla Espinel": {
+        "Ambetter": 125,
+        "Cigna": 10,
+        "Molina": 15,
+        "Oscar": 23,
+        "United HC": 26
+      },
+      "Leysi Espinel": {
+        "Ambetter": 407,
+        "Cigna": 25,
+        "Molina": 151
+      },
+      "Luis Sosa": {
+        "Ambetter": 776,
+        "Cigna": 66,
+        "Molina": 109,
+        "Oscar": 405,
+        "United HC": 262
+      },
+      "Michael Lavernia": {
+        "Ambetter": 803,
+        "Cigna": 107,
+        "Molina": 34,
+        "Oscar": 519,
+        "United HC": 120
+      },
+      "Osmayra Vega": {
+        "Ambetter": 568,
+        "Molina": 76,
+        "Oscar": 374,
+        "United HC": 246
+      },
+      "Ruddy Arteaga": {
+        "Ambetter": 162,
+        "Cigna": 41,
+        "Molina": 33,
+        "Oscar": 43,
+        "United HC": 88
+      },
+      "Yusbell Ortega": {
+        "Ambetter": 927,
+        "Cigna": 50,
+        "Oscar": 247,
+        "United HC": 245
+      }
+    },
+    "03/20": {
+      "Anthony Montenegro": {
+        "Ambetter": 211,
+        "Cigna": 29,
+        "Molina": 34,
+        "Oscar": 108,
+        "United HC": 53
+      },
+      "Brandon Kaplan": {
+        "Ambetter": 95,
+        "Molina": 6,
+        "Oscar": 16,
+        "United HC": 21
+      },
+      "Felipe Ramirez": {
+        "Ambetter": 461,
+        "Cigna": 72,
+        "Molina": 53,
+        "Oscar": 167,
+        "United HC": 226
+      },
+      "Jonathan Diaz": {
+        "Ambetter": 167,
+        "Cigna": 78,
+        "Molina": 31,
+        "Oscar": 51,
+        "United HC": 79
+      },
+      "Jose Ariza": {
+        "Ambetter": 614,
+        "Cigna": 6,
+        "Molina": 100,
+        "United HC": 64
+      },
+      "Jose Lares": {
+        "Ambetter": 63,
+        "Cigna": 11,
+        "Oscar": 25
+      },
+      "Juan Gallegos": {
+        "Ambetter": 535,
+        "Cigna": 18,
+        "Molina": 38,
+        "United HC": 146
+      },
+      "Justin Santa": {
+        "Ambetter": 765,
+        "Cigna": 49,
+        "Molina": 19,
+        "Oscar": 611,
+        "United HC": 157
+      },
+      "Kerry St Germain": {
+        "Ambetter": 213,
+        "Molina": 61,
+        "Oscar": 128
+      },
+      "Layla Espinel": {
+        "Ambetter": 122,
+        "Cigna": 10,
+        "Molina": 15,
+        "Oscar": 23,
+        "United HC": 26
+      },
+      "Leysi Espinel": {
+        "Ambetter": 421,
+        "Cigna": 25,
+        "Molina": 150
+      },
+      "Luis Sosa": {
+        "Ambetter": 759,
+        "Cigna": 65,
+        "Molina": 108,
+        "Oscar": 402,
+        "United HC": 259
+      },
+      "Michael Lavernia": {
+        "Ambetter": 819,
+        "Cigna": 105,
+        "Molina": 32,
+        "Oscar": 345,
+        "United HC": 117
+      },
+      "Osmayra Vega": {
+        "Ambetter": 622,
+        "Molina": 77,
+        "Oscar": 397,
+        "United HC": 245
+      },
+      "Ruddy Arteaga": {
+        "Ambetter": 162,
+        "Cigna": 41,
+        "Molina": 34,
+        "Oscar": 43,
+        "United HC": 75
+      },
+      "Yusbell Ortega": {
+        "Ambetter": 904,
+        "Cigna": 49,
+        "Oscar": 246,
+        "United HC": 244
+      }
+    },
+    "03/23": {
+      "Anthony Montenegro": {
+        "Ambetter": 211,
+        "Cigna": 29,
+        "Molina": 34,
+        "Oscar": 108,
+        "United HC": 53
+      },
+      "Brandon Kaplan": {
+        "Ambetter": 95,
+        "Molina": 6,
+        "Oscar": 16,
+        "United HC": 22
+      },
+      "Felipe Ramirez": {
+        "Ambetter": 461,
+        "Cigna": 72,
+        "Molina": 53,
+        "Oscar": 166,
+        "United HC": 228
+      },
+      "Jonathan Diaz": {
+        "Ambetter": 167,
+        "Cigna": 78,
+        "Molina": 31,
+        "Oscar": 51,
+        "United HC": 78
+      },
+      "Jose Ariza": {
+        "Ambetter": 614,
+        "Cigna": 6,
+        "Molina": 99,
+        "United HC": 64
+      },
+      "Jose Lares": {
+        "Ambetter": 63,
+        "Cigna": 11,
+        "Oscar": 25
+      },
+      "Juan Gallegos": {
+        "Ambetter": 538,
+        "Cigna": 18,
+        "Molina": 38,
+        "United HC": 146
+      },
+      "Justin Santa": {
+        "Ambetter": 764,
+        "Cigna": 49,
+        "Molina": 19,
+        "Oscar": 607,
+        "United HC": 157
+      },
+      "Kerry St Germain": {
+        "Ambetter": 213,
+        "Molina": 61,
+        "Oscar": 128
+      },
+      "Layla Espinel": {
+        "Ambetter": 122,
+        "Cigna": 10,
+        "Molina": 15,
+        "Oscar": 23,
+        "United HC": 26
+      },
+      "Leysi Espinel": {
+        "Ambetter": 421,
+        "Cigna": 25,
+        "Molina": 150
+      },
+      "Luis Sosa": {
+        "Ambetter": 760,
+        "Cigna": 65,
+        "Molina": 108,
+        "Oscar": 402,
+        "United HC": 258
+      },
+      "Michael Lavernia": {
+        "Ambetter": 821,
+        "Cigna": 105,
+        "Molina": 32,
+        "Oscar": 345,
+        "United HC": 116
+      },
+      "Osmayra Vega": {
+        "Ambetter": 623,
+        "Molina": 77,
+        "Oscar": 395,
+        "United HC": 246
+      },
+      "Ruddy Arteaga": {
+        "Ambetter": 162,
+        "Cigna": 41,
+        "Molina": 34,
+        "Oscar": 43,
+        "United HC": 75
+      },
+      "Yusbell Ortega": {
+        "Ambetter": 904,
+        "Cigna": 49,
+        "Oscar": 246,
+        "United HC": 242
+      }
+    },
+    "03/27": {
+      "Anthony Montenegro": {
+        "Ambetter": 209,
+        "Cigna": 29,
+        "Molina": 34,
+        "Oscar": 108,
+        "United HC": 53
+      },
+      "Brandon Kaplan": {
+        "Ambetter": 97,
+        "Molina": 6,
+        "Oscar": 16,
+        "United HC": 22
+      },
+      "Felipe Ramirez": {
+        "Ambetter": 459,
+        "Cigna": 72,
+        "Molina": 53,
+        "Oscar": 166,
+        "United HC": 227
+      },
+      "Jonathan Diaz": {
+        "Ambetter": 167,
+        "Cigna": 78,
+        "Molina": 31,
+        "Oscar": 51,
+        "United HC": 78
+      },
+      "Jose Ariza": {
+        "Ambetter": 609,
+        "Cigna": 6,
+        "Molina": 99,
+        "United HC": 64
+      },
+      "Jose Lares": {
+        "Ambetter": 63,
+        "Cigna": 11,
+        "Oscar": 25
+      },
+      "Juan Gallegos": {
+        "Ambetter": 553,
+        "Cigna": 18,
+        "Molina": 38,
+        "United HC": 151
+      },
+      "Justin Santa": {
+        "Ambetter": 763,
+        "Cigna": 48,
+        "Molina": 19,
+        "Oscar": 606,
+        "United HC": 156
+      },
+      "Kerry St Germain": {
+        "Ambetter": 211,
+        "Molina": 61,
+        "Oscar": 128
+      },
+      "Layla Espinel": {
+        "Ambetter": 119,
+        "Cigna": 10,
+        "Molina": 15,
+        "Oscar": 23,
+        "United HC": 26
+      },
+      "Leysi Espinel": {
+        "Ambetter": 419,
+        "Cigna": 25,
+        "Molina": 149
+      },
+      "Luis Sosa": {
+        "Ambetter": 757,
+        "Cigna": 65,
+        "Molina": 108,
+        "Oscar": 400,
+        "United HC": 258
+      },
+      "Michael Lavernia": {
+        "Ambetter": 827,
+        "Cigna": 105,
+        "Molina": 32,
+        "Oscar": 359,
+        "United HC": 125
+      },
+      "Osmayra Vega": {
+        "Ambetter": 659,
+        "Molina": 77,
+        "Oscar": 415,
+        "United HC": 251
+      },
+      "Ruddy Arteaga": {
+        "Ambetter": 162,
+        "Cigna": 41,
+        "Molina": 34,
+        "Oscar": 43,
+        "United HC": 75
+      },
+      "Yusbell Ortega": {
+        "Ambetter": 901,
+        "Cigna": 49,
+        "Oscar": 245,
+        "United HC": 241
+      }
+    },
+    "03/30": {
+      "Anthony Montenegro": {
+        "Ambetter": 209,
+        "Cigna": 29,
+        "Molina": 34,
+        "Oscar": 108,
+        "United HC": 53
+      },
+      "Brandon Kaplan": {
+        "Ambetter": 97,
+        "Cigna": 1,
+        "Molina": 6,
+        "Oscar": 16,
+        "United HC": 22
+      },
+      "Felipe Ramirez": {
+        "Ambetter": 459,
+        "Cigna": 72,
+        "Molina": 53,
+        "Oscar": 166,
+        "United HC": 227
+      },
+      "Jonathan Diaz": {
+        "Ambetter": 167,
+        "Cigna": 78,
+        "Molina": 31,
+        "Oscar": 51,
+        "United HC": 77
+      },
+      "Jose Ariza": {
+        "Ambetter": 609,
+        "Cigna": 6,
+        "Molina": 99,
+        "United HC": 64
+      },
+      "Jose Lares": {
+        "Ambetter": 63,
+        "Cigna": 11,
+        "Oscar": 25
+      },
+      "Juan Gallegos": {
+        "Ambetter": 554,
+        "Cigna": 18,
+        "Molina": 38,
+        "United HC": 151
+      },
+      "Justin Santa": {
+        "Ambetter": 763,
+        "Cigna": 48,
+        "Molina": 19,
+        "Oscar": 605,
+        "United HC": 156
+      },
+      "Kerry St Germain": {
+        "Ambetter": 211,
+        "Molina": 61,
+        "Oscar": 128
+      },
+      "Layla Espinel": {
+        "Ambetter": 119,
+        "Cigna": 10,
+        "Molina": 15,
+        "Oscar": 23,
+        "United HC": 26
+      },
+      "Leysi Espinel": {
+        "Ambetter": 419,
+        "Cigna": 25,
+        "Molina": 150
+      },
+      "Luis Sosa": {
+        "Ambetter": 763,
+        "Cigna": 65,
+        "Molina": 109,
+        "Oscar": 408,
+        "United HC": 258
+      },
+      "Michael Lavernia": {
+        "Ambetter": 831,
+        "Cigna": 106,
+        "Molina": 34,
+        "Oscar": 365,
+        "United HC": 124
+      },
+      "Osmayra Vega": {
+        "Ambetter": 662,
+        "Molina": 79,
+        "Oscar": 423,
+        "United HC": 251
+      },
+      "Ruddy Arteaga": {
+        "Ambetter": 162,
+        "Cigna": 41,
+        "Molina": 34,
+        "Oscar": 43,
+        "United HC": 75
+      },
+      "Yusbell Ortega": {
+        "Ambetter": 900,
+        "Cigna": 49,
+        "Oscar": 245,
+        "United HC": 241
+      }
+    },
+    "04/01": {
+      "Anthony Montenegro": {
+        "Ambetter": 206,
+        "Cigna": 28,
+        "Molina": 34,
+        "Oscar": 97,
+        "United HC": 53
+      },
+      "Brandon Kaplan": {
+        "Ambetter": 94,
+        "Cigna": 1,
+        "Molina": 6,
+        "Oscar": 16,
+        "United HC": 22
+      },
+      "Felipe Ramirez": {
+        "Ambetter": 452,
+        "Cigna": 58,
+        "Molina": 52,
+        "Oscar": 160,
+        "United HC": 227
+      },
+      "Jonathan Diaz": {
+        "Ambetter": 163,
+        "Cigna": 56,
+        "Molina": 30,
+        "Oscar": 52,
+        "United HC": 77
+      },
+      "Jose Ariza": {
+        "Ambetter": 554,
+        "Molina": 93,
+        "United HC": 64
+      },
+      "Jose Lares": {
+        "Ambetter": 63,
+        "Cigna": 11,
+        "Oscar": 24
+      },
+      "Juan Gallegos": {
+        "Ambetter": 16,
+        "Cigna": 16,
+        "Molina": 38,
+        "United HC": 151
+      },
+      "Justin Santa": {
+        "Ambetter": 727,
+        "Cigna": 30,
+        "Molina": 18,
+        "Oscar": 482,
+        "United HC": 156
+      },
+      "Kerry St Germain": {
+        "Ambetter": 206,
+        "Molina": 56,
+        "Oscar": 84
+      },
+      "Layla Espinel": {
+        "Ambetter": 116,
+        "Molina": 15,
+        "Oscar": 20,
+        "United HC": 26
+      },
+      "Leysi Espinel": {
+        "Ambetter": 417,
+        "Molina": 128
+      },
+      "Luis Sosa": {
+        "Ambetter": 744,
+        "Cigna": 51,
+        "Molina": 99,
+        "Oscar": 351,
+        "United HC": 258
+      },
+      "Michael Lavernia": {
+        "Ambetter": 809,
+        "Cigna": 75,
+        "Molina": 32,
+        "Oscar": 322,
+        "United HC": 124
+      },
+      "Osmayra Vega": {
+        "Ambetter": 650,
+        "Molina": 76,
+        "Oscar": 377,
+        "United HC": 251
+      },
+      "Ruddy Arteaga": {
+        "Ambetter": 162,
+        "Cigna": 34,
+        "Molina": 34,
+        "Oscar": 42,
+        "United HC": 75
+      },
+      "Yusbell Ortega": {
+        "Ambetter": 881,
+        "Oscar": 209,
+        "United HC": 241
+      }
+    },
+    "04/06": {
+      "Anthony Montenegro": {
+        "Ambetter": 186,
+        "Cigna": 28,
+        "Molina": 34,
+        "Oscar": 96,
+        "United HC": 50
+      },
+      "Brandon Kaplan": {
+        "Ambetter": 80,
+        "Cigna": 1,
+        "Molina": 6,
+        "Oscar": 16,
+        "United HC": 20
+      },
+      "Felipe Ramirez": {
+        "Ambetter": 418,
+        "Cigna": 58,
+        "Molina": 52,
+        "Oscar": 160,
+        "United HC": 208
+      },
+      "Jonathan Diaz": {
+        "Ambetter": 154,
+        "Cigna": 56,
+        "Molina": 30,
+        "Oscar": 52,
+        "United HC": 76
+      },
+      "Jose Ariza": {
+        "Ambetter": 514,
+        "Cigna": 6,
+        "Molina": 93,
+        "United HC": 64
+      },
+      "Jose Lares": {
+        "Ambetter": 59,
+        "Cigna": 11,
+        "Oscar": 24
+      },
+      "Juan Gallegos": {
+        "Ambetter": 420,
+        "Cigna": 16,
+        "Molina": 39,
+        "United HC": 138
+      },
+      "Justin Santa": {
+        "Ambetter": 463,
+        "Cigna": 30,
+        "Molina": 18,
+        "Oscar": 478,
+        "United HC": 135
+      },
+      "Kerry St Germain": {
+        "Ambetter": 152,
+        "Molina": 56,
+        "Oscar": 82
+      },
+      "Layla Espinel": {
+        "Ambetter": 107,
+        "Cigna": 10,
+        "Molina": 15,
+        "Oscar": 20,
+        "United HC": 22
+      },
+      "Leysi Espinel": {
+        "Ambetter": 364,
+        "Cigna": 27,
+        "Molina": 127
+      },
+      "Luis Sosa": {
+        "Ambetter": 689,
+        "Cigna": 51,
+        "Molina": 100,
+        "Oscar": 368,
+        "United HC": 226
+      },
+      "Michael Lavernia": {
+        "Ambetter": 652,
+        "Cigna": 75,
+        "Molina": 32,
+        "Oscar": 352,
+        "United HC": 118
+      },
+      "Osmayra Vega": {
+        "Ambetter": 662,
+        "Molina": 79,
+        "Oscar": 403,
+        "United HC": 232
+      },
+      "Ruddy Arteaga": {
+        "Ambetter": 146,
+        "Cigna": 34,
+        "Molina": 34,
+        "Oscar": 42,
+        "United HC": 60
+      },
+      "Yusbell Ortega": {
+        "Ambetter": 525,
+        "Cigna": 44,
+        "Oscar": 209,
+        "United HC": 193
+      }
+    },
+    "04/10": {
+      "Anthony Montenegro": {
+        "Ambetter": 183,
+        "Cigna": 28,
+        "Molina": 31,
+        "Oscar": 96,
+        "United HC": 50
+      },
+      "Brandon Kaplan": {
+        "Ambetter": 80,
+        "Molina": 6,
+        "Oscar": 16,
+        "United HC": 20
+      },
+      "Felipe Ramirez": {
+        "Ambetter": 413,
+        "Cigna": 58,
+        "Molina": 52,
+        "Oscar": 160,
+        "United HC": 208
+      },
+      "Jonathan Diaz": {
+        "Ambetter": 153,
+        "Cigna": 56,
+        "Molina": 30,
+        "Oscar": 52,
+        "United HC": 76
+      },
+      "Jose Ariza": {
+        "Ambetter": 516,
+        "Cigna": 6,
+        "Molina": 87,
+        "United HC": 64
+      },
+      "Jose Lares": {
+        "Ambetter": 58,
+        "Cigna": 11,
+        "Oscar": 24
+      },
+      "Juan Gallegos": {
+        "Ambetter": 420,
+        "Cigna": 16,
+        "Molina": 35,
+        "United HC": 138
+      },
+      "Justin Santa": {
+        "Ambetter": 459,
+        "Cigna": 30,
+        "Molina": 15,
+        "Oscar": 478,
+        "United HC": 135
+      },
+      "Kerry St Germain": {
+        "Ambetter": 151,
+        "Molina": 55,
+        "Oscar": 82
+      },
+      "Layla Espinel": {
+        "Ambetter": 107,
+        "Cigna": 10,
+        "Molina": 15,
+        "United HC": 22
+      },
+      "Leysi Espinel": {
+        "Ambetter": 365,
+        "Cigna": 27,
+        "Molina": 121
+      },
+      "Luis Sosa": {
+        "Ambetter": 707,
+        "Cigna": 50,
+        "Molina": 95,
+        "Oscar": 377,
+        "United HC": 226
+      },
+      "Michael Lavernia": {
+        "Ambetter": 668,
+        "Cigna": 75,
+        "Molina": 34,
+        "Oscar": 361,
+        "United HC": 118
+      },
+      "Osmayra Vega": {
+        "Ambetter": 660,
+        "Molina": 73,
+        "Oscar": 407,
+        "United HC": 232
+      },
+      "Ruddy Arteaga": {
+        "Ambetter": 146,
+        "Cigna": 34,
+        "Molina": 34,
+        "Oscar": 42,
+        "United HC": 60
+      },
+      "Yusbell Ortega": {
+        "Ambetter": 526,
+        "Cigna": 45,
+        "Oscar": 210,
+        "United HC": 193
+      }
+    },
+    "04/13": {
+      "Anthony Montenegro": {
+        "Ambetter": 184,
+        "Cigna": 28,
+        "Molina": 31,
+        "Oscar": 96,
+        "United HC": 52
+      },
+      "Brandon Kaplan": {
+        "Ambetter": 80,
+        "Cigna": 1,
+        "Molina": 6,
+        "Oscar": 16,
+        "United HC": 20
+      },
+      "Felipe Ramirez": {
+        "Ambetter": 413,
+        "Cigna": 60,
+        "Molina": 52,
+        "Oscar": 160,
+        "United HC": 210
+      },
+      "Jonathan Diaz": {
+        "Ambetter": 152,
+        "Cigna": 56,
+        "Molina": 30,
+        "Oscar": 52,
+        "United HC": 76
+      },
+      "Jose Ariza": {
+        "Ambetter": 517,
+        "Cigna": 6,
+        "Molina": 87,
+        "United HC": 64
+      },
+      "Jose Lares": {
+        "Ambetter": 58,
+        "Cigna": 11,
+        "Oscar": 24
+      },
+      "Juan Gallegos": {
+        "Ambetter": 419,
+        "Cigna": 16,
+        "Molina": 35,
+        "United HC": 144
+      },
+      "Justin Santa": {
+        "Ambetter": 458,
+        "Cigna": 31,
+        "Molina": 15,
+        "Oscar": 478,
+        "United HC": 143
+      },
+      "Kerry St Germain": {
+        "Ambetter": 151,
+        "Molina": 55,
+        "Oscar": 82
+      },
+      "Layla Espinel": {
+        "Ambetter": 107,
+        "Cigna": 10,
+        "Molina": 15,
+        "Oscar": 19,
+        "United HC": 22
+      },
+      "Leysi Espinel": {
+        "Ambetter": 366,
+        "Cigna": 27,
+        "Molina": 121
+      },
+      "Luis Sosa": {
+        "Ambetter": 720,
+        "Cigna": 50,
+        "Molina": 95,
+        "Oscar": 377,
+        "United HC": 241
+      },
+      "Michael Lavernia": {
+        "Ambetter": 695,
+        "Cigna": 75,
+        "Molina": 37,
+        "Oscar": 367,
+        "United HC": 126
+      },
+      "Osmayra Vega": {
+        "Ambetter": 660,
+        "Molina": 73,
+        "Oscar": 414,
+        "United HC": 247
+      },
+      "Ruddy Arteaga": {
+        "Ambetter": 146,
+        "Cigna": 34,
+        "Molina": 34,
+        "Oscar": 42,
+        "United HC": 60
+      },
+      "Yusbell Ortega": {
+        "Ambetter": 525,
+        "Cigna": 45,
+        "Oscar": 210,
+        "United HC": 198
+      }
+    },
+    "04/17": {
+      "Aaron Duarte": {
+        "Ambetter": 1
+      },
+      "Anthony Montenegro": {
+        "Ambetter": 186,
+        "Cigna": 28,
+        "Molina": 31,
+        "Oscar": 96,
+        "United HC": 55
+      },
+      "Brandon Kaplan": {
+        "Ambetter": 80,
+        "Molina": 6,
+        "Oscar": 16,
+        "United HC": 20
+      },
+      "Danielle Attias": {
+        "Ambetter": 55
+      },
+      "Felipe Ramirez": {
+        "Ambetter": 413,
+        "Cigna": 58,
+        "Molina": 52,
+        "Oscar": 160,
+        "United HC": 211
+      },
+      "Jonathan Diaz": {
+        "Ambetter": 152,
+        "Cigna": 56,
+        "Molina": 30,
+        "Oscar": 50,
+        "United HC": 76
+      },
+      "Jose Ariza": {
+        "Ambetter": 516,
+        "Cigna": 6,
+        "Molina": 86,
+        "United HC": 64
+      },
+      "Jose Lares": {
+        "Ambetter": 58,
+        "Cigna": 11,
+        "Oscar": 23
+      },
+      "Juan Gallegos": {
+        "Ambetter": 421,
+        "Cigna": 16,
+        "Molina": 35,
+        "United HC": 141
+      },
+      "Justin Santa": {
+        "Ambetter": 456,
+        "Cigna": 30,
+        "Molina": 15,
+        "Oscar": 478,
+        "United HC": 142
+      },
+      "Kerry St Germain": {
+        "Ambetter": 151,
+        "Molina": 55,
+        "Oscar": 82
+      },
+      "Kirsten Cuevas": {
+        "Ambetter": 68
+      },
+      "Layla Espinel": {
+        "Ambetter": 107,
+        "Cigna": 10,
+        "Molina": 15,
+        "Oscar": 20,
+        "United HC": 22
+      },
+      "Leysi Espinel": {
+        "Ambetter": 364,
+        "Cigna": 27,
+        "Molina": 122
+      },
+      "Luis Sosa": {
+        "Ambetter": 731,
+        "Cigna": 49,
+        "Molina": 114,
+        "United HC": 255
+      },
+      "Michael Lavernia": {
+        "Ambetter": 697,
+        "Cigna": 76,
+        "Molina": 38,
+        "Oscar": 364,
+        "United HC": 138
+      },
+      "Michael Ortiz": {
+        "Ambetter": 141
+      },
+      "Nicholas Cuevas": {
+        "Ambetter": 139
+      },
+      "Osmayra Vega": {
+        "Ambetter": 662,
+        "Molina": 73,
+        "Oscar": 413,
+        "United HC": 240
+      },
+      "Ruddy Arteaga": {
+        "Ambetter": 146,
+        "Cigna": 34,
+        "Molina": 34,
+        "Oscar": 42,
+        "United HC": 60
+      },
+      "Yusbell Ortega": {
+        "Ambetter": 525,
+        "Cigna": 45,
+        "Oscar": 210,
+        "United HC": 198
+      }
+    },
+    "04/20": {
+      "Aaron Duarte": {
+        "Ambetter": 1,
+        "Oscar": 6
+      },
+      "Anthony Montenegro": {
+        "Ambetter": 186,
+        "Cigna": 28,
+        "Molina": 31,
+        "Oscar": 96,
+        "United HC": 55
+      },
+      "Brandon Kaplan": {
+        "Ambetter": 80,
+        "Molina": 6,
+        "Oscar": 16,
+        "United HC": 20
+      },
+      "Danielle Attias": {
+        "Ambetter": 66,
+        "Oscar": 72,
+        "United HC": 28
+      },
+      "Felipe Ramirez": {
+        "Ambetter": 413,
+        "Cigna": 58,
+        "Molina": 52,
+        "Oscar": 160,
+        "United HC": 211
+      },
+      "Jonathan Diaz": {
+        "Ambetter": 152,
+        "Cigna": 56,
+        "Molina": 30,
+        "Oscar": 50,
+        "United HC": 76
+      },
+      "Jose Ariza": {
+        "Ambetter": 515,
+        "Cigna": 6,
+        "Molina": 86,
+        "United HC": 64
+      },
+      "Jose Lares": {
+        "Ambetter": 58,
+        "Cigna": 11,
+        "Oscar": 23
+      },
+      "Juan Gallegos": {
+        "Ambetter": 421,
+        "Cigna": 16,
+        "Molina": 35,
+        "United HC": 141
+      },
+      "Justin Santa": {
+        "Ambetter": 455,
+        "Cigna": 30,
+        "Molina": 15,
+        "Oscar": 478,
+        "United HC": 142
+      },
+      "Kerry St Germain": {
+        "Ambetter": 151,
+        "Molina": 56,
+        "Oscar": 82
+      },
+      "Kirsten Cuevas": {
+        "Ambetter": 68
+      },
+      "Layla Espinel": {
+        "Ambetter": 107,
+        "Cigna": 10,
+        "Molina": 15,
+        "Oscar": 20,
+        "United HC": 22
+      },
+      "Leysi Espinel": {
+        "Ambetter": 364,
+        "Molina": 122
+      },
+      "Luis Sosa": {
+        "Ambetter": 735,
+        "Cigna": 49,
+        "Molina": 116,
+        "United HC": 255
+      },
+      "Michael Lavernia": {
+        "Ambetter": 702,
+        "Cigna": 77,
+        "Molina": 45,
+        "Oscar": 361,
+        "United HC": 138
+      },
+      "Michael Ortiz": {
+        "Ambetter": 143
+      },
+      "Nicholas Cuevas": {
+        "Ambetter": 169,
+        "Oscar": 130
+      },
+      "Osmayra Vega": {
+        "Ambetter": 662,
+        "Molina": 73,
+        "Oscar": 411,
+        "United HC": 240
+      },
+      "Ruddy Arteaga": {
+        "Ambetter": 146,
+        "Cigna": 34,
+        "Molina": 34,
+        "Oscar": 42,
+        "United HC": 60
+      },
+      "Yusbell Ortega": {
+        "Ambetter": 525,
+        "Cigna": 45,
+        "Oscar": 210,
+        "United HC": 198
+      }
+    },
+    "04/23": {
+      "Aaron Duarte": {
+        "Ambetter": 9,
+        "Oscar": 65
+      },
+      "Anthony Montenegro": {
+        "Ambetter": 188,
+        "Cigna": 28,
+        "Molina": 31,
+        "Oscar": 96,
+        "United HC": 55
+      },
+      "Brandon Kaplan": {
+        "Ambetter": 80,
+        "Molina": 6,
+        "Oscar": 16,
+        "United HC": 20
+      },
+      "Danielle Attias": {
+        "Ambetter": 66,
+        "Oscar": 87,
+        "United HC": 28
+      },
+      "Felipe Ramirez": {
+        "Ambetter": 412,
+        "Cigna": 57,
+        "Molina": 52,
+        "Oscar": 160,
+        "United HC": 210
+      },
+      "Jonathan Diaz": {
+        "Ambetter": 150,
+        "Cigna": 63,
+        "Molina": 29,
+        "Oscar": 50,
+        "United HC": 76
+      },
+      "Jose Ariza": {
+        "Ambetter": 515,
+        "Cigna": 6,
+        "Molina": 87,
+        "United HC": 64
+      },
+      "Jose Lares": {
+        "Ambetter": 58,
+        "Cigna": 11,
+        "Oscar": 25
+      },
+      "Juan Gallegos": {
+        "Ambetter": 420,
+        "Cigna": 15,
+        "Molina": 34,
+        "United HC": 142
+      },
+      "Justin Santa": {
+        "Ambetter": 455,
+        "Cigna": 30,
+        "Molina": 15,
+        "Oscar": 478,
+        "United HC": 143
+      },
+      "Kerry St Germain": {
+        "Ambetter": 149,
+        "Molina": 56,
+        "Oscar": 82
+      },
+      "Kirsten Cuevas": {
+        "Ambetter": 87,
+        "Oscar": 38
+      },
+      "Layla Espinel": {
+        "Ambetter": 107,
+        "Cigna": 10,
+        "Molina": 15,
+        "Oscar": 20,
+        "United HC": 22
+      },
+      "Leysi Espinel": {
+        "Ambetter": 363,
+        "Cigna": 27,
+        "Molina": 122
+      },
+      "Luis Sosa": {
+        "Ambetter": 738,
+        "Cigna": 49,
+        "Molina": 117,
+        "United HC": 256
+      },
+      "Michael Lavernia": {
+        "Ambetter": 708,
+        "Cigna": 77,
+        "Molina": 48,
+        "Oscar": 374,
+        "United HC": 141
+      },
+      "Michael Ortiz": {
+        "Ambetter": 183
+      },
+      "Nicholas Cuevas": {
+        "Ambetter": 179,
+        "Oscar": 142
+      },
+      "Osmayra Vega": {
+        "Ambetter": 664,
+        "Molina": 73,
+        "Oscar": 409,
+        "United HC": 243
+      },
+      "Ruddy Arteaga": {
+        "Ambetter": 146,
+        "Cigna": 34,
+        "Molina": 34,
+        "Oscar": 42,
+        "United HC": 59
+      },
+      "Yusbell Ortega": {
+        "Ambetter": 527,
+        "Cigna": 45,
+        "Oscar": 209,
+        "United HC": 198
+      }
+    },
+    "04/24": {
+      "Aaron Duarte": {
+        "Ambetter": 14,
+        "Oscar": 85
+      },
+      "Anthony Montenegro": {
+        "Ambetter": 188,
+        "Cigna": 28,
+        "Molina": 31,
+        "Oscar": 96,
+        "United HC": 54
+      },
+      "Brandon Kaplan": {
+        "Ambetter": 80,
+        "Molina": 6,
+        "Oscar": 16,
+        "United HC": 20
+      },
+      "Danielle Attias": {
+        "Ambetter": 66,
+        "Oscar": 87,
+        "United HC": 28
+      },
+      "Felipe Ramirez": {
+        "Ambetter": 412,
+        "Cigna": 58,
+        "Molina": 52,
+        "Oscar": 160,
+        "United HC": 210
+      },
+      "Jonathan Diaz": {
+        "Ambetter": 150,
+        "Cigna": 57,
+        "Molina": 29,
+        "Oscar": 50,
+        "United HC": 76
+      },
+      "Jose Ariza": {
+        "Ambetter": 516,
+        "Cigna": 6,
+        "Molina": 87,
+        "United HC": 64
+      },
+      "Jose Lares": {
+        "Ambetter": 58,
+        "Cigna": 11,
+        "Oscar": 25
+      },
+      "Juan Gallegos": {
+        "Ambetter": 420,
+        "Cigna": 15,
+        "Molina": 34,
+        "United HC": 142
+      },
+      "Justin Santa": {
+        "Ambetter": 455,
+        "Cigna": 30,
+        "Molina": 15,
+        "Oscar": 478,
+        "United HC": 142
+      },
+      "Kerry St Germain": {
+        "Ambetter": 149,
+        "Molina": 56,
+        "Oscar": 82
+      },
+      "Kirsten Cuevas": {
+        "Ambetter": 97,
+        "Oscar": 49
+      },
+      "Layla Espinel": {
+        "Ambetter": 107,
+        "Cigna": 10,
+        "Molina": 15,
+        "Oscar": 20,
+        "United HC": 22
+      },
+      "Leysi Espinel": {
+        "Ambetter": 363,
+        "Cigna": 27,
+        "Molina": 122
+      },
+      "Luis Sosa": {
+        "Ambetter": 739,
+        "Cigna": 49,
+        "Molina": 117,
+        "United HC": 265
+      },
+      "Michael Lavernia": {
+        "Ambetter": 708,
+        "Cigna": 77,
+        "Molina": 48,
+        "Oscar": 377,
+        "United HC": 168
+      },
+      "Michael Ortiz": {
+        "Ambetter": 195
+      },
+      "Nicholas Cuevas": {
+        "Ambetter": 178,
+        "Oscar": 142
+      },
+      "Osmayra Vega": {
+        "Ambetter": 664,
+        "Molina": 73,
+        "Oscar": 409,
+        "United HC": 243
+      },
+      "Ruddy Arteaga": {
+        "Ambetter": 146,
+        "Cigna": 34,
+        "Molina": 34,
+        "Oscar": 42,
+        "United HC": 59
+      },
+      "Yusbell Ortega": {
+        "Ambetter": 527,
+        "Cigna": 45,
+        "Oscar": 209,
+        "United HC": 198
+      }
+    },
+    "04/27": {
+      "Aaron Duarte": {
+        "Ambetter": 18,
+        "Oscar": 97
+      },
+      "Anthony Montenegro": {
+        "Ambetter": 188,
+        "Cigna": 28,
+        "Molina": 31,
+        "Oscar": 96,
+        "United HC": 57
+      },
+      "Brandon Kaplan": {
+        "Ambetter": 80,
+        "Molina": 6,
+        "Oscar": 16,
+        "United HC": 20
+      },
+      "Danielle Attias": {
+        "Ambetter": 66,
+        "Oscar": 87,
+        "United HC": 28
+      },
+      "Felipe Ramirez": {
+        "Ambetter": 412,
+        "Cigna": 57,
+        "Molina": 52,
+        "Oscar": 160,
+        "United HC": 210
+      },
+      "Jonathan Diaz": {
+        "Ambetter": 150,
+        "Cigna": 56,
+        "Molina": 29,
+        "Oscar": 50,
+        "United HC": 76
+      },
+      "Jose Ariza": {
+        "Ambetter": 516,
+        "Cigna": 6,
+        "Molina": 87,
+        "United HC": 64
+      },
+      "Jose Lares": {
+        "Ambetter": 58,
+        "Cigna": 11,
+        "Oscar": 25
+      },
+      "Juan Gallegos": {
+        "Ambetter": 420,
+        "Cigna": 15,
+        "Molina": 34,
+        "United HC": 142
+      },
+      "Justin Santa": {
+        "Ambetter": 455,
+        "Cigna": 30,
+        "Molina": 15,
+        "Oscar": 478,
+        "United HC": 142
+      },
+      "Kerry St Germain": {
+        "Ambetter": 149,
+        "Molina": 56,
+        "Oscar": 82
+      },
+      "Kirsten Cuevas": {
+        "Ambetter": 106,
+        "Oscar": 60
+      },
+      "Layla Espinel": {
+        "Ambetter": 107,
+        "Cigna": 10,
+        "Molina": 15,
+        "Oscar": 20,
+        "United HC": 22
+      },
+      "Leysi Espinel": {
+        "Ambetter": 363,
+        "Cigna": 27,
+        "Molina": 122
+      },
+      "Luis Sosa": {
+        "Ambetter": 739,
+        "Cigna": 50,
+        "Molina": 117,
+        "United HC": 267
+      },
+      "Michael Lavernia": {
+        "Ambetter": 710,
+        "Cigna": 77,
+        "Molina": 55,
+        "Oscar": 377,
+        "United HC": 168
+      },
+      "Michael Ortiz": {
+        "Ambetter": 196
+      },
+      "Nicholas Cuevas": {
+        "Ambetter": 176,
+        "Oscar": 142
+      },
+      "Osmayra Vega": {
+        "Ambetter": 663,
+        "Molina": 75,
+        "Oscar": 417,
+        "United HC": 243
+      },
+      "Ruddy Arteaga": {
+        "Ambetter": 146,
+        "Cigna": 33,
+        "Molina": 34,
+        "Oscar": 42,
+        "United HC": 59
+      },
+      "Yusbell Ortega": {
+        "Ambetter": 527,
+        "Cigna": 45,
+        "Oscar": 209,
+        "United HC": 198
+      }
+    },
+    "04/29": {
+      "Aaron Duarte": {
+        "Ambetter": 28,
+        "Oscar": 126,
+        "United HC": 2
+      },
+      "Anthony Montenegro": {
+        "Ambetter": 189,
+        "Cigna": 28,
+        "Molina": 31,
+        "Oscar": 96,
+        "United HC": 55,
+        "United": 55
+      },
+      "Brandon Kaplan": {
+        "Ambetter": 80,
+        "Molina": 6,
+        "Oscar": 16,
+        "United HC": 20,
+        "United": 20
+      },
+      "Danielle Attias": {
+        "Ambetter": 69,
+        "Oscar": 90,
+        "United HC": 39
+      },
+      "Felipe Ramirez": {
+        "Ambetter": 412,
+        "Cigna": 57,
+        "Molina": 52,
+        "Oscar": 160,
+        "United HC": 208,
+        "United": 208
+      },
+      "Jonathan Diaz": {
+        "Ambetter": 150,
+        "Cigna": 56,
+        "Molina": 29,
+        "Oscar": 50,
+        "United HC": 76,
+        "United": 76
+      },
+      "Jose Ariza": {
+        "Ambetter": 521,
+        "Cigna": 6,
+        "Molina": 87,
+        "United HC": 64
+      },
+      "Jose Lares": {
+        "Ambetter": 58,
+        "Cigna": 11,
+        "Oscar": 25
+      },
+      "Juan Gallegos": {
+        "Ambetter": 430,
+        "Cigna": 15,
+        "Molina": 34,
+        "United HC": 142,
+        "United": 142
+      },
+      "Justin Santa": {
+        "Ambetter": 454,
+        "Cigna": 30,
+        "Molina": 15,
+        "Oscar": 478,
+        "United HC": 142,
+        "United": 142
+      },
+      "Kerry St Germain": {
+        "Ambetter": 152,
+        "Molina": 56,
+        "Oscar": 82
+      },
+      "Kirsten Cuevas": {
+        "Ambetter": 121,
+        "Oscar": 79
+      },
+      "Layla Espinel": {
+        "Ambetter": 107,
+        "Cigna": 10,
+        "Molina": 15,
+        "Oscar": 20,
+        "United HC": 22,
+        "United": 22
+      },
+      "Leysi Espinel": {
+        "Ambetter": 363,
+        "Cigna": 27,
+        "Molina": 122
+      },
+      "Luis Sosa": {
+        "Ambetter": 764,
+        "Cigna": 52,
+        "Molina": 117,
+        "United HC": 267,
+        "United": 267
+      },
+      "Michael Lavernia": {
+        "Ambetter": 722,
+        "Cigna": 77,
+        "Molina": 55,
+        "Oscar": 409,
+        "United HC": 169,
+        "United": 169
+      },
+      "Michael Ortiz": {
+        "Ambetter": 210
+      },
+      "Nicholas Cuevas": {
+        "Ambetter": 170,
+        "Oscar": 139
+      },
+      "Osmayra Vega": {
+        "Ambetter": 694,
+        "Molina": 77,
+        "Oscar": 428,
+        "United HC": 245,
+        "United": 245
+      },
+      "Ruddy Arteaga": {
+        "Ambetter": 146,
+        "Cigna": 33,
+        "Molina": 34,
+        "Oscar": 41,
+        "United HC": 59,
+        "United": 59
+      },
+      "Yusbell Ortega": {
+        "Ambetter": 524,
+        "Cigna": 45,
+        "Oscar": 208,
+        "United HC": 198,
+        "United": 198
+      },
+      "Luis Sossa": {
+        "Ambetter": 764
+      },
+      "Yusbell": {
+        "Ambetter": 524
+      },
+      "Ruddy Ortega": {
+        "Ambetter": 146,
+        "Oscar": 41
+      },
+      "Juan Dedios Gallegos Jr": {
+        "Molina": 34
+      },
+      "Ruddy Arteaga Bascope": {
+        "Molina": 34
+      }
+    }
+  }
+}
