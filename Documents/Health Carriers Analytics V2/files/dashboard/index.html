@@ -300,8 +300,8 @@ select:focus{border-color:var(--blue)}
   </nav>
   <div class="sb-footer">
     <div class="sb-date-lbl">Last Updated</div>
-    <div class="sb-date-val">April 27, 2026</div>
-    <div class="sb-agents">22 agents · 5 carriers</div>
+    <div class="sb-date-val" id="sb-date-val">—</div>
+    <div class="sb-agents" id="sb-agents">—</div>
   </div>
 </aside>
 
@@ -340,7 +340,7 @@ const NEW_A=["Nicholas Cuevas","Kirsten Cuevas","Aaron Duarte","Michael Ortiz","
 const ALL_A=[...LEGACY,...NEW_A];
 
 /* ─── RUNTIME GLOBALS (set after fetch) ─────────────────── */
-let DATES,CARRIERS,D,LATEST,FIRST;
+let DATES,CARRIERS,D,LATEST,FIRST,YEAR;
 
 /* ─── HELPERS ─────────────────────────────────────────── */
 const f=n=>n?.toLocaleString()??'—';
@@ -350,6 +350,7 @@ const lct=(d,c)=>LEGACY.reduce((s,a)=>s+(D[d]?.[a]?.[c]||0),0);
 const gt=d=>ALL_A.reduce((s,a)=>s+at(d,a),0);
 const pchg=(a,b)=>b===0?'—':((a-b)/b*100).toFixed(1)+'%';
 const psign=(a,b)=>{const v=(a-b)/b*100;return(v>0?'+':'')+v.toFixed(1)+'%'};
+const fmtDate=(d,yr=false)=>{const[m,dy]=d.split('/');const o={month:'long',day:'numeric'};if(yr)o.year='numeric';return new Date(YEAR||new Date().getFullYear(),+m-1,+dy).toLocaleDateString('en-US',o)};
 
 /* ─── CHART DEFAULTS ──────────────────────────────────── */
 const CD={responsive:true,maintainAspectRatio:false,
@@ -392,8 +393,8 @@ function rOV(){
   <div class="g g4 first">
     <div class="kpi"><div class="kpi-bar" style="background:linear-gradient(90deg,var(--navy),var(--blue))"></div>
       <div class="kpi-label">Active Members</div><div class="kpi-val">${f(gtL)}</div>
-      <div class="kpi-badge b-amber">▼ ${Math.abs(((gtL-gt0)/gt0*100).toFixed(1))}% since Mar 2</div>
-      <div class="kpi-sub">Peak: ${f(gt0)} on March 2</div></div>
+      <div class="kpi-badge b-amber">▼ ${Math.abs(((gtL-gt0)/gt0*100).toFixed(1))}% since ${fmtDate(FIRST)}</div>
+      <div class="kpi-sub">Peak: ${f(gt0)} on ${fmtDate(FIRST)}</div></div>
     <div class="kpi"><div class="kpi-bar" style="background:var(--amb)"></div>
       <div class="kpi-label">Ambetter</div><div class="kpi-val">${f(ambL)}</div>
       <div class="kpi-badge b-blue">${((ambL/total)*100).toFixed(1)}% of portfolio</div>
@@ -408,8 +409,8 @@ function rOV(){
       <div class="kpi-sub">16 legacy · 6 new (Ambetter)</div></div>
   </div>
   <div class="g g21" style="margin-top:16px">
-    <div class="card"><div class="card-hd">Portfolio Trend — March 2 to April 27</div><div class="card-sub">Weekly active member count across all 22 agents and 5 carriers</div><div style="height:250px"><canvas id="ch-grand"></canvas></div></div>
-    <div class="card"><div class="card-hd">Carrier Mix — April 27</div><div class="card-sub">${f(total)} total active members</div>
+    <div class="card"><div class="card-hd">Portfolio Trend — ${fmtDate(FIRST)} to ${fmtDate(LATEST)}</div><div class="card-sub">Weekly active member count across all ${ALL_A.length} agents and ${CARRIERS.length} carriers</div><div style="height:250px"><canvas id="ch-grand"></canvas></div></div>
+    <div class="card"><div class="card-hd">Carrier Mix — ${fmtDate(LATEST)}</div><div class="card-sub">${f(total)} total active members</div>
       ${share.map(c=>`<div class="cleg">
         <div class="cleg-l"><span class="cdot" style="background:${CCLR[c.name]}"></span>${c.name}</div>
         <div style="display:flex;align-items:center;gap:14px">
@@ -484,6 +485,8 @@ function rCA(){
 ═══════════════════════════════════════════════════════ */
 function rAG(){
   const el=document.getElementById('content');
+  const prevDate=DATES[DATES.length-2];
+  const currDate=LATEST;
   el.innerHTML=`
   <div class="filter-row">
     <span class="fl">Snapshot</span>
@@ -492,9 +495,9 @@ function rAG(){
     <select id="ag-cp">${DATES.map(d=>`<option value="${d}" ${d===FIRST?'selected':''}>${d}</option>`).join('')}</select>
   </div>
   <div id="ag-tbl"></div>
-  <div class="sh"><h2>Week-over-Week — Apr 20 to Apr 27</h2><hr class="rule"></div>
+  <div class="sh"><h2>Week-over-Week — ${prevDate} to ${currDate}</h2><hr class="rule"></div>
   <div class="wow-grid" id="wow"></div>
-  <div class="sh"><h2>Portfolio Size — April 27</h2><p>Green = stable/growing · Amber = moderate decline · Red = significant decline vs March 2</p><hr class="rule"></div>
+  <div class="sh"><h2>Portfolio Size — ${currDate}</h2><p>Green = stable/growing · Amber = moderate decline · Red = significant decline vs ${fmtDate(FIRST)}</p><hr class="rule"></div>
   <div class="card"><div style="height:610px"><canvas id="ch-ab"></canvas></div></div>`;
 
   const buildTbl=(dt,cp)=>{
@@ -508,7 +511,7 @@ function rAG(){
         const pC=vC>0?((dC/vC)*100).toFixed(1):'—';
         const p0=v0>0?((d0/v0)*100).toFixed(1):'—';
         return `<tr><td class="td-a">${a}${isN?'<span class="td-new">NEW</span>':''}</td>
-          ${CARRIERS.map(c=>`<td class="tc">${(D[dt]?.[a]?.[c]||0)>0?f(D[dt]?.[a]?.[c]):'<span class="td-miss">—</span>'}</td>`).join('')}
+          ${CARRIERS.map(c=>{const v=D[dt]?.[a]?.[c]||0,vc=D[cp]?.[a]?.[c]||0,both=D[dt]?.[a]?.[c]>0&&D[cp]?.[a]?.[c]>0;let b='';if(both){const dl=v-vc;b=dl>0?`<span style="font-size:10px;color:var(--green);margin-left:3px">↑+${dl}</span>`:dl<0?`<span style="font-size:10px;color:var(--red);margin-left:3px">↓${dl}</span>`:`<span style="font-size:10px;color:var(--txt4);margin-left:3px">—</span>`;}return`<td class="tc">${v>0?f(v)+b:'<span class="td-miss">—</span>'}</td>`}).join('')}
           <td class="tc" style="font-weight:700">${f(vN)}</td>
           <td class="tc ${dC<-5?'td-neg':dC>5?'td-pos':'td-flat'}">${dC>0?'+':''}${dC}${vC===0?'<span class="td-new">new</span>':pC!=='—'?` (${dC>0?'+':''}${pC}%)`:''}</td>
           <td class="tc ${d0<-50?'td-neg':d0>10?'td-pos':'td-flat'}">${d0>0?'+':''}${d0}</td>
@@ -516,13 +519,13 @@ function rAG(){
       }).join('')}</tbody></table></div>`;
   };
 
-  buildTbl(LATEST,'04/24');
+  buildTbl(LATEST,FIRST);
   document.getElementById('ag-dt').onchange=function(){buildTbl(this.value,document.getElementById('ag-cp').value)};
   document.getElementById('ag-cp').onchange=function(){buildTbl(document.getElementById('ag-dt').value,this.value)};
 
   const wow=document.getElementById('wow');
   ALL_A.slice().sort((a,b)=>at(LATEST,b)-at(LATEST,a)).forEach(a=>{
-    const now=at('04/24',a),prev=at('04/23',a)||0,d=now-prev;
+    const now=at(currDate,a),prev=at(prevDate,a)||0,d=now-prev;
     wow.innerHTML+=`<div class="kpi" style="padding:13px 15px">
       <div class="kpi-label" style="font-size:9.5px">${a}${NEW_A.includes(a)?'<span class="td-new">N</span>':''}</div>
       <div style="font-family:'Geist Mono',monospace;font-size:20px;font-weight:700;color:${d<0?'var(--red)':d>0?'var(--green)':'var(--txt4)'}">${d>0?'+':''}${d}</div>
@@ -535,7 +538,7 @@ function rAG(){
 ═══════════════════════════════════════════════════════ */
 function rAB(){
   const el=document.getElementById('content');
-  const legPk=lct(FIRST,'Ambetter'), legFl=lct('04/06','Ambetter'), legNow=lct(LATEST,'Ambetter');
+  const legPk=lct(FIRST,'Ambetter'), legNow=lct(LATEST,'Ambetter');
   const totalLost=legPk-legNow;
   const newAmb=NEW_A.reduce((s,a)=>s+(D[LATEST]?.[a]?.Ambetter||0),0);
   const losses=LEGACY.map(a=>({name:a,v0:D[FIRST]?.[a]?.Ambetter||0,vL:D[LATEST]?.[a]?.Ambetter||0}))
@@ -547,7 +550,7 @@ function rAB(){
   el.innerHTML=`
   <div class="cbox c-navy" style="margin-bottom:18px">
     <h3>📋 Scope of this analysis</h3>
-    <p>The legacy Ambetter book (16 original agents) declined from <strong>${f(legPk)}</strong> to <strong>${f(legNow)}</strong> between March 2 and April 27. This page isolates where the loss occurred, when it stopped, and the most likely cause.</p>
+    <p>The legacy Ambetter book (16 original agents) declined from <strong>${f(legPk)}</strong> to <strong>${f(legNow)}</strong> between ${fmtDate(FIRST)} and ${fmtDate(LATEST)}. This page isolates where the loss occurred, when it stopped, and the most likely cause.</p>
   </div>
   <div class="g g3">
     <div class="kpi"><div class="kpi-bar" style="background:var(--red)"></div>
@@ -562,7 +565,7 @@ function rAB(){
       <div class="kpi-badge b-green">6 new agents</div>
       <div class="kpi-sub">Partial offset of legacy loss</div></div>
   </div>
-  <div class="sh"><h2>Member Loss by Agent — March 2 to April 27</h2><hr class="rule"></div>
+  <div class="sh"><h2>Member Loss by Agent — ${fmtDate(FIRST)} to ${fmtDate(LATEST)}</h2><hr class="rule"></div>
   <div class="card">
     ${losses.map(x=>`<div class="lbar-row">
       <div class="lbar-name">${x.name}</div>
@@ -607,11 +610,15 @@ function rIN(){
   const gtL=gt(LATEST), gt0=gt(FIRST);
   const legNow=LEGACY.reduce((s,a)=>s+at(LATEST,a),0);
   const newNow=NEW_A.reduce((s,a)=>s+at(LATEST,a),0);
+  const inPrev=DATES[DATES.length-2];
+  const rampD3=DATES.length>=3?DATES[DATES.length-3]:DATES[0];
+  const rampD2=DATES[DATES.length-2];
+  const rampD1=LATEST;
 
   el.innerHTML=`
   <div class="cbox c-navy">
-    <h3>📊 Daily Snapshot — April 27, 2026</h3>
-    <p>Portfolio at <strong>${f(gtL)}</strong> active members (22 agents, 5 carriers). Up <strong style="color:var(--green)">+${f(gtL-gt('04/23'))}</strong> from yesterday. Note: Luis Sosa's Oscar value was null in today's sheet — <strong>carried forward from April 23 (377 members)</strong> to avoid false churn signal. The adjusted total reflects the most accurate available data.</p>
+    <h3>📊 Daily Snapshot — ${fmtDate(LATEST,true)}</h3>
+    <p>Portfolio at <strong>${f(gtL)}</strong> active members (${ALL_A.length} agents, ${CARRIERS.length} carriers). Up <strong style="color:var(--green)">+${f(gtL-gt(inPrev))}</strong> from previous snapshot. Note: Luis Sosa's Oscar value was null in the latest run — <strong>carried forward from the prior snapshot</strong> to avoid false churn signal. The adjusted total reflects the most accurate available data.</p>
   </div>
   <div class="g g2" style="margin-top:4px">
     <div class="cbox c-green">
@@ -620,17 +627,17 @@ function rIN(){
     </div>
     <div class="cbox c-amber">
       <h3>⚑ Data Quality Flag — Luis Sosa Oscar</h3>
-      <p>Luis Sosa's Oscar column was blank in today's Excel sheet (showed as null → 0). This is a <strong>recurring portal data gap</strong>, not a member loss. His Oscar count has been carried forward at <strong>377</strong> from April 23. Please verify in the portal and update tomorrow's entry. This issue has occurred on 04/01 and 04/10 as well.</p>
+      <p>Luis Sosa's Oscar column was blank in the latest run (showed as null → 0). This is a <strong>recurring portal data gap</strong>, not a member loss. His Oscar count has been carried forward from the prior snapshot. Please verify in the portal and update the next entry.</p>
     </div>
   </div>
   <div class="cbox c-navy" style="margin-top:4px">
     <h3>📊 The March → April Arc (Full Picture)</h3>
     <p style="margin-top:0">
-    • <strong>March 2</strong>: ${f(gt('03/02'))} members — 16 agents, all-time peak<br>
+    • <strong>${fmtDate(FIRST)}</strong>: ${f(gt(FIRST))} members — 16 agents, all-time peak<br>
     • <strong>March 30</strong>: ${f(gt('03/30'))} members — gradual OEP attrition (−7.3%)<br>
     • <strong>April 6</strong>: ${f(gt('04/06'))} members — structural floor after OEP cancellation batch<br>
     • <strong>April 23</strong>: ${f(gt('04/23'))} members — stabilized, new agents fully ramping<br>
-    • <strong>April 27</strong>: ${f(gtL)} members — <strong style="color:var(--green)">growing</strong>, 22 agents, daily cadence begins
+    • <strong>${fmtDate(LATEST)}</strong>: ${f(gtL)} members — <strong style="color:var(--green)">growing</strong>, ${ALL_A.length} agents, daily cadence begins
     </p>
   </div>
   <div class="sh"><h2>Retention Leaders</h2><p>Agents who significantly outperformed during the April contraction</p><hr class="rule"></div>
@@ -646,12 +653,12 @@ function rIN(){
       <div style="font-size:12px;color:var(--txt3);line-height:1.65">${x.note}</div>
     </div>`}).join('')}
   </div>
-  <div class="sh"><h2>New Agent Ramp — April 27</h2><hr class="rule"></div>
+  <div class="sh"><h2>New Agent Ramp — ${fmtDate(LATEST)}</h2><hr class="rule"></div>
   <div class="tbl-wrap"><table>
-    <thead><tr><th>Agent</th><th>Apr 20</th><th>Apr 23</th><th>Apr 27</th><th>Day Δ</th><th>Ambetter</th><th>Oscar</th><th>UHC</th></tr></thead>
+    <thead><tr><th>Agent</th><th>${rampD3}</th><th>${rampD2}</th><th>${rampD1}</th><th>Day Δ</th><th>Ambetter</th><th>Oscar</th><th>UHC</th></tr></thead>
     <tbody>
     ${NEW_A.map(a=>{
-      const t20=at('04/20',a),t23=at('04/23',a),t24=at(LATEST,a),d=t24-t23;
+      const t20=at(rampD3,a),t23=at(rampD2,a),t24=at(rampD1,a),d=t24-t23;
       const amb=D[LATEST]?.[a]?.Ambetter||0, osc=D[LATEST]?.[a]?.Oscar||0, uhc=D[LATEST]?.[a]?.['United HC']||0;
       return `<tr><td class="td-a">${a}</td>
         <td class="tc">${f(t20)}</td><td class="tc">${f(t23)}</td><td class="tc" style="font-weight:700">${f(t24)}</td>
@@ -667,8 +674,8 @@ function rIN(){
   <div class="actions-grid">
     ${[
       {icon:'🔎',p:'p-u',pc:'URGENT',bc:'var(--red)',t:'Fix Luis Sosa Oscar Data Gap',b:'Oscar null in today\'s sheet for Luis Sosa — this is the 3rd occurrence (also 04/01, 04/10). Pull his actual Oscar count from the portal and update tomorrow\'s entry. Consider a validation check in the bot to flag null Oscar values for agents with known Oscar books.'},
-      {icon:'🤝',p:'p-u',pc:'URGENT',bc:'var(--red)',t:'Oscar Carrier Meeting',b:'Oscar lost 34% since March 2 (3,393 → 2,327). Schedule a formal carrier review covering plan competitiveness, network adequacy, and member satisfaction.'},
-      {icon:'⭐',p:'p-h',pc:'HIGH',bc:'var(--amber)',t:"Document Mike Lavernia's UHC Growth",b:'Mike gained +27 UHC members today — the single largest daily gain on the team. This mirrors Osmayra\'s retention pattern. Document what\'s driving this before the next reporting cycle.'},
+      {icon:'🤝',p:'p-u',pc:'URGENT',bc:'var(--red)',t:'Oscar Carrier Meeting',b:`Oscar lost ${((1-ct(LATEST,'Oscar')/ct(FIRST,'Oscar'))*100).toFixed(0)}% since the first snapshot (${f(ct(FIRST,'Oscar'))} → ${f(ct(LATEST,'Oscar'))}). Schedule a formal carrier review covering plan competitiveness, network adequacy, and member satisfaction.`},
+      {icon:'⭐',p:'p-h',pc:'HIGH',bc:'var(--amber)',t:"Document Mike Lavernia's UHC Growth",b:'Mike had the single largest daily UHC gain on the team this period. This mirrors Osmayra\'s retention pattern. Document what\'s driving this before the next reporting cycle.'},
       {icon:'🚀',p:'p-h',pc:'HIGH',bc:'var(--amber)',t:'Accelerate New Agent Carrier Expansion',b:'Aaron Durante hit 99 total today (+25). Kirsten Cuevas at 146 (+21). Both are expanding into Oscar. Michael Ortiz at 195 remains Ambetter-only — certify him on Oscar or Molina this week.'},
       {icon:'📊',p:'p-m',pc:'MEDIUM',bc:'var(--blue)',t:'Daily Reporting → Automation',b:'Now that we\'re running daily, manual Excel entry is a bottleneck. Prioritize the Sheets automation pipeline so the bots write directly and this dashboard updates without manual intervention.'},
       {icon:'🎯',p:'p-m',pc:'MEDIUM',bc:'var(--blue)',t:'Validate Ambetter OEP Losses',b:'Cross-reference the 1,758 Ambetter deactivations in the R2 log. Confirm OEP first-payment-default vs. voluntary cancel before any corrective action. Results determine the AEP 2026 win-back strategy.'},
@@ -739,6 +746,12 @@ async function startDashboard(){
     LATEST=data.meta.latest_date;
     FIRST=data.meta.first_date;
     CARRIERS=data.carriers;
+    YEAR=parseInt((data.meta.generated||'2026').substring(0,4),10);
+    document.getElementById('sb-date-val').textContent=fmtDate(LATEST,true);
+    document.getElementById('sb-agents').textContent=`${ALL_A.length} agents · ${CARRIERS.length} carriers`;
+    document.querySelector('.tb-left p').textContent=`${fmtDate(FIRST)} – ${fmtDate(LATEST,true)} · ${DATES.length} snapshots`;
+    document.querySelector('.tb-badge').textContent=`Daily Report · ${fmtDate(LATEST)}`;
+    document.querySelector('.tb-meta').textContent=`${DATES.length} snapshots · ${ALL_A.length} agents`;
     rOV();
     requestAnimationFrame(()=>initCharts('overview'));
     setTimeout(()=>{
