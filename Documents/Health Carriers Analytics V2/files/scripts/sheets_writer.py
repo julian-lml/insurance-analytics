@@ -589,6 +589,8 @@ def export_dashboard_json(r1_records: list[dict]) -> None:
         run_type = str(rec.get("run_type",  "Manual")).strip()
         if not agent or not carrier:
             continue
+        CARRIER_NORMALIZE = {"United": "United HC"}
+        carrier = CARRIER_NORMALIZE.get(carrier, carrier)
         D_out.setdefault(date_key, {}).setdefault(agent, {})[carrier] = count
         rt_out[date_key] = run_type
 
