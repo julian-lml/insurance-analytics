@@ -55,6 +55,7 @@ from scripts.utils import (
     get_r2_start_date,
     write_r1_xlsx,
     append_deactivated_xlsx,
+    write_active_members_xlsx,
 )
 
 log = logging.getLogger(__name__)
@@ -73,6 +74,7 @@ COL_LAST_NAME     = _COLS["last_name"]
 COL_STATE         = _COLS["state"]
 COL_DOB           = _COLS["member_dob"]
 COL_POLICY_STATUS = _COLS["policy_status"]
+COL_PRODUCT       = _COLS["product"]   # R3: plan_name
 
 # ─── Selectors ────────────────────────────────────────────────────────────────
 
@@ -191,6 +193,37 @@ def _build_r2_records(
     return records
 
 
+def _build_r3_records(
+    df: pd.DataFrame,
+    agent_name: str,
+    run_date: str,
+) -> list[dict]:
+    """
+    R3 schema — CLAUDE.md §5. Active rows (planStatus == 'A') from full BOB download.
+    policy_number: null — no subscriber ID column confirmed (CLAUDE.md §8.20.5).
+    coverage_start_date: null — not in Jarvis export.
+    """
+    active_df = df[df[COL_POLICY_STATUS].str.strip() == "A"].copy() if COL_POLICY_STATUS in df.columns else df.copy()
+
+    records = []
+    for _, row in active_df.iterrows():
+        dob_val = row.get(COL_DOB)
+        records.append({
+            "run_date":            run_date,
+            "carrier":             "United",
+            "agent_name":          agent_name,
+            "member_first_name":   str(row.get(COL_FIRST_NAME, "") or "").strip(),
+            "member_last_name":    str(row.get(COL_LAST_NAME,  "") or "").strip(),
+            "member_dob":          str(dob_val) if pd.notna(dob_val) else None,
+            "state":               str(row.get(COL_STATE, "") or "").strip() or None,
+            "policy_number":       None,  # not confirmed (CLAUDE.md §8.20.5)
+            "plan_name":           str(row.get(COL_PRODUCT, "") or "").strip() or None,
+            "coverage_start_date": None,  # not in Jarvis export
+            "policy_status":       "Active",
+        })
+    return records
+
+
 def _parse_export_file(file_path: Path) -> pd.DataFrame:
     """Read XLSX or CSV by extension."""
     if file_path.suffix.lower() == ".csv":
@@ -222,7 +255,8 @@ async def _run_single_agent(
     dry_run: bool,
     run_date: str,
     run_type: str,
-) -> tuple[dict, list[dict]]:
+    mode: str = "regular",
+) -> tuple[dict, list[dict], list[dict]]:
     """
     Full browser flow for one United agent.
     Receives a fresh BrowserContext per call — browser lifecycle is managed
@@ -289,12 +323,19 @@ async def _run_single_agent(
     duration_r1 = time.monotonic() - t_start
     r1 = _build_r1_record(agent_name, active_members, run_date, run_type, duration_r1)
 
-    # ── R2: wait for human-triggered download ────────────────────────────
-    print(f"\n[United -- {agent_name}] R2 EXPORT -- do this in the browser:")
-    print("  1. Navigate to the Book of Business export section")
-    print(f"  2. Apply filter: Terminated, Termination Date on/after {period_start.strftime('%m/%d/%Y')}")
-    print("  3. Click Download, select columns, click Download in the modal")
-    print("  (bot is listening — do NOT press ENTER, just complete the download)")
+    # ── R2 / Roster: wait for human-triggered download ───────────────────
+    if mode == "roster":
+        print(f"\n[United -- {agent_name}] ROSTER EXPORT -- do this in the browser:")
+        print("  1. Navigate to the Book of Business export section")
+        print("  2. Do NOT apply any status filter — export ALL members (full BOB)")
+        print("  3. Click Download, select columns, click Download in the modal")
+        print("  (bot is listening — do NOT press ENTER, just complete the download)")
+    else:
+        print(f"\n[United -- {agent_name}] R2 EXPORT -- do this in the browser:")
+        print("  1. Navigate to the Book of Business export section")
+        print(f"  2. Apply filter: Terminated, Termination Date on/after {period_start.strftime('%m/%d/%Y')}")
+        print("  3. Click Download, select columns, click Download in the modal")
+        print("  (bot is listening — do NOT press ENTER, just complete the download)")
 
     download = await page.wait_for_event("download", timeout=180_000)
     export_path = dl_dir / download.suggested_filename
@@ -303,9 +344,9 @@ async def _run_single_agent(
 
     if export_path is None:
         log.info("[United] %s: R1 active=%d  R2 records=0", agent_name, r1["active_members"])
-        return r1, []
+        return r1, [], []
 
-    # ── Parse export file -> R2 records ───────────────────────────────────────
+    # ── Parse export file -> R2 + (roster) R3 records ─────────────────────────
     df = _read_export(export_path)
 
     log.info("[United] %s: export rows=%d  columns=%s", agent_name, len(df), list(df.columns))
@@ -327,12 +368,13 @@ async def _run_single_agent(
             raise ValueError(f"Cannot process export — missing critical columns: {missing}")
 
     r2 = _build_r2_records(df, agent_name, run_date)
+    r3 = _build_r3_records(df, agent_name, run_date) if mode == "roster" else []
 
     log.info(
-        "[United] %s: R1 active=%d  R2 records=%d  period_start=%s",
-        agent_name, r1["active_members"], len(r2), period_start,
+        "[United] %s: R1 active=%d  R2 records=%d  R3 records=%d  period_start=%s",
+        agent_name, r1["active_members"], len(r2), len(r3), period_start,
     )
-    return r1, r2
+    return r1, r2, r3
 
 
 # ─── All-agents loop ──────────────────────────────────────────────────────────
@@ -343,13 +385,25 @@ async def _run_all_agents_async(
     run_date: str,
     run_type: str,
     headless: bool,
+    mode: str = "regular",
 ) -> tuple[list[dict], list[dict]]:
     from playwright.async_api import async_playwright
 
     all_r1: list[dict] = []
     all_r2: list[dict] = []
+    all_r3: list[dict] = []
 
     for agent in agents:
+        if agent.get("skip_bot", False):
+            log.info("United | [%s] skip_bot=true — skipping automation", agent["name"])
+            if mode == "roster":
+                log.warning(
+                    "United | [%s] ROSTER REMINDER: this agent requires manual data entry. "
+                    "Add R3 records for this agent manually after the roster run.",
+                    agent["name"],
+                )
+            continue
+
         # Per-agent persistent Chrome profile — accumulates real session data
         # so the portal sees a legitimate returning browser, not a sterile context.
         agent_profile = str(
@@ -368,19 +422,21 @@ async def _run_all_agents_async(
                 "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
             )
             try:
-                r1_record, r2_records = await _run_single_agent(
-                    agent, context, dry_run, run_date, run_type
+                r1_record, r2_records, r3_records = await _run_single_agent(
+                    agent, context, dry_run, run_date, run_type, mode=mode
                 )
             except Exception as exc:
                 log.error(f"[United] {agent['name']}: unhandled error — {exc}", exc_info=True)
-                r1_record = _failed_r1(agent["name"], run_date, run_type, str(exc))
+                r1_record  = _failed_r1(agent["name"], run_date, run_type, str(exc))
                 r2_records = []
+                r3_records = []
             finally:
                 await context.close()
 
         if r1_record:
             all_r1.append(r1_record)
         all_r2.extend(r2_records)
+        all_r3.extend(r3_records)
 
     success_count = sum(1 for r in all_r1 if r["status"] == "success")
 
@@ -388,10 +444,12 @@ async def _run_all_agents_async(
         success_r1 = [r for r in all_r1 if r["status"] == "success"]
         write_r1_xlsx(success_r1, "United", log)
         append_deactivated_xlsx(all_r2, "United", log)
+        if mode == "roster":
+            write_active_members_xlsx(all_r3, "United", log)
         # No state file for United (CLAUDE.md §10 / §8.17)
         log.info(
-            "[United] Run complete -- %d/%d agents succeeded, %d R2 records written",
-            success_count, len(agents), len(all_r2),
+            "[United] Run complete -- %d/%d agents succeeded, %d R2 records, %d R3 records written",
+            success_count, len(agents), len(all_r2), len(all_r3),
         )
     else:
         log.info("[United] DRY RUN -- XLSX write skipped")
@@ -425,6 +483,7 @@ def run_united(
     dry_run: bool = False,
     agent_filter: int | None = None,
     headless: bool = False,
+    mode: str = "regular",
 ) -> tuple[list[dict], list[dict]]:
     """
     Public API. Called by launcher or standalone.
@@ -447,7 +506,7 @@ def run_united(
         log.info(f"[United] Single-agent mode: {agents[0]['name']}")
 
     return asyncio.run(
-        _run_all_agents_async(agents, dry_run, run_date, rt, headless)
+        _run_all_agents_async(agents, dry_run, run_date, rt, headless, mode=mode)
     )
 
 
@@ -464,11 +523,14 @@ if __name__ == "__main__":
             "  python scripts/united_bot.py --agent 0\n"
             "  python scripts/united_bot.py --agent 0 --dry-run\n"
             "  python scripts/united_bot.py --headless --dry-run\n"
+            "  python scripts/united_bot.py --agent 0 --dry-run --mode roster\n"
         ),
     )
     parser.add_argument("--agent", type=int, default=None)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--headless", action="store_true")
+    parser.add_argument("--mode", choices=["regular", "roster"], default="regular",
+                        help="regular (R1+R2) or roster (R1+R2+R3, full BOB download)")
     args = parser.parse_args()
 
-    run_united(dry_run=args.dry_run, agent_filter=args.agent, headless=args.headless)
+    run_united(dry_run=args.dry_run, agent_filter=args.agent, headless=args.headless, mode=args.mode)

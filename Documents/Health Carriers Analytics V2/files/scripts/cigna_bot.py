@@ -51,6 +51,7 @@ from scripts.utils import (
     get_r2_start_date,
     write_r1_xlsx,
     append_deactivated_xlsx,
+    write_active_members_xlsx,
 )
 
 log = logging.getLogger(__name__)
@@ -61,11 +62,14 @@ _CFG_PATH = ROOT / "config" / "config.yaml"
 with open(_CFG_PATH, encoding="utf-8") as _f:
     _CFG = yaml.safe_load(_f)
 _COLS = _CFG["carriers"]["cigna"]["columns"]
-COL_TERM_DATE   = _COLS["termination_date"]
-COL_FIRST_NAME  = _COLS["first_name"]
-COL_LAST_NAME   = _COLS["last_name"]
-COL_POLICY_NUM  = _COLS["policy_number"]
-COL_STATE       = _COLS["state"]
+COL_TERM_DATE      = _COLS["termination_date"]
+COL_FIRST_NAME     = _COLS["first_name"]
+COL_LAST_NAME      = _COLS["last_name"]
+COL_POLICY_NUM     = _COLS["policy_number"]
+COL_STATE          = _COLS["state"]
+COL_POLICY_STATUS  = _COLS["policy_status"]
+COL_EFFECTIVE_DATE = _COLS["effective_date"]
+COL_PLAN_NAME      = _COLS["plan_name"]
 
 # ─── Selectors — pulled from config.yaml carriers.cigna.selectors ─────────────
 
@@ -185,6 +189,35 @@ def _build_r2_records(
     return records
 
 
+def _build_r3_records(
+    df: pd.DataFrame,
+    agent_name: str,
+    run_date: str,
+) -> list[dict]:
+    """
+    R3 schema — CLAUDE.md §5. Active rows from roster-mode export.
+    member_dob always null — not available in Cigna export (CLAUDE.md §8.12).
+    """
+    active_df = df[df[COL_POLICY_STATUS].str.strip() == "Active"].copy()
+
+    records = []
+    for _, row in active_df.iterrows():
+        records.append({
+            "run_date":            run_date,
+            "carrier":             "Cigna",
+            "agent_name":          agent_name,
+            "member_first_name":   str(row.get(COL_FIRST_NAME, "") or "").strip(),
+            "member_last_name":    str(row.get(COL_LAST_NAME,  "") or "").strip(),
+            "member_dob":          None,  # not in Cigna export (CLAUDE.md §8.12)
+            "state":               str(row.get(COL_STATE, "") or "").strip() or None,
+            "policy_number":       str(row.get(COL_POLICY_NUM, "") or "").strip() or None,
+            "plan_name":           str(row.get(COL_PLAN_NAME, "") or "").strip() or None,
+            "coverage_start_date": str(row.get(COL_EFFECTIVE_DATE, "") or "").strip() or None,
+            "policy_status":       "Active",
+        })
+    return records
+
+
 def _parse_export_file(file_path: Path) -> pd.DataFrame:
     """Read XLSX or CSV by extension."""
     if file_path.suffix.lower() == ".csv":
@@ -210,7 +243,8 @@ async def _run_single_agent(
     run_date: str,
     run_type: str,
     headless: bool,
-) -> tuple[dict, list[dict]]:
+    mode: str = "regular",
+) -> tuple[dict, list[dict], list[dict]]:
     """
     Full browser flow for one Cigna agent.
     Returns (r1_record, r2_records).
@@ -324,18 +358,25 @@ async def _run_single_agent(
         duration_r1 = time.monotonic() - t_start
         r1 = _build_r1_record(agent_name, active_members, run_date, run_type, duration_r1)
 
-        # ── R2: semi-manual filter → Export ──────────────────────────────────────
+        # ── R2/Roster filter → Export ─────────────────────────────────────────────
         # Angular SPA does not register programmatic checkbox changes — automated
         # filter attempts all produced Active rows in the export (CLAUDE.md §8.15).
         # Human applies the filter; bot reads the count label and exports.
 
         period_start_str = period_start.strftime("%m/%d/%Y")
-        print(f"\n[Cigna — {agent_name}] R2 FILTER — do this manually in the browser:")
-        print("  1. Click the 'Filter' button")
-        print("  2. Uncheck 'Active', check 'Terminated'")
-        print(f"  3. Set Termination Date: 'on and after' → {period_start_str}")
-        print("  4. Click Apply and wait for results to load")
-        print("  5. Press ENTER when ready")
+        if mode == "roster":
+            print(f"\n[Cigna — {agent_name}] ROSTER FILTER — do this manually in the browser:")
+            print("  1. Click the 'Filter' button")
+            print("  2. Select ALL POLICIES (no status filter)")
+            print("  3. Click Apply and wait for results to load")
+            print("  4. Press ENTER when ready")
+        else:
+            print(f"\n[Cigna — {agent_name}] R2 FILTER — do this manually in the browser:")
+            print("  1. Click the 'Filter' button")
+            print("  2. Uncheck 'Active', check 'Terminated'")
+            print(f"  3. Set Termination Date: 'on and after' → {period_start_str}")
+            print("  4. Click Apply and wait for results to load")
+            print("  5. Press ENTER when ready")
         input()
 
         # Read R2 count — if 0, skip export entirely and return early.
@@ -347,14 +388,14 @@ async def _run_single_agent(
             r2_count = -1  # unknown — attempt export anyway
             log.warning(f"[Cigna] {agent_name}: R2 count label not readable — attempting export")
 
-        if r2_count == 0:
+        if r2_count == 0 and mode == "regular":
             log.info(f"[Cigna] {agent_name}: R2 count = 0 — no terminated members this period, skipping export")
             await browser.close()
             log.info(
                 f"[Cigna] {agent_name}: R1 active={r1['active_members']} "
                 f"R2 records=0 period_start={period_start}"
             )
-            return r1, []
+            return r1, [], []
 
         try:
             async with page.expect_download(timeout=8000) as dl_info:
@@ -370,7 +411,7 @@ async def _run_single_agent(
             log.info(f"[Cigna] {agent_name}: downloaded {download.suggested_filename} → {export_path}")
         except Exception:
             log.info("[Cigna] %s: export timed out or portal error — R2 = 0", agent_name)
-            return r1, []
+            return r1, [], []
 
         await browser.close()
 
@@ -396,12 +437,13 @@ async def _run_single_agent(
             raise ValueError(f"Cannot process export — missing critical columns: {missing}")
 
     r2 = _build_r2_records(df, agent_name, run_date)
+    r3 = _build_r3_records(df, agent_name, run_date) if mode == "roster" else []
 
     log.info(
         f"[Cigna] {agent_name}: R1 active={r1['active_members']} "
-        f"R2 records={len(r2)} period_start={period_start}"
+        f"R2 records={len(r2)} R3 records={len(r3)} period_start={period_start}"
     )
-    return r1, r2
+    return r1, r2, r3
 
 
 # ─── All-agents loop ──────────────────────────────────────────────────────────
@@ -412,23 +454,27 @@ async def _run_all_agents_async(
     run_date: str,
     run_type: str,
     headless: bool,
+    mode: str = "regular",
 ) -> tuple[list[dict], list[dict]]:
     all_r1: list[dict] = []
     all_r2: list[dict] = []
+    all_r3: list[dict] = []
 
     for agent in agents:
         try:
-            r1_record, r2_records = await _run_single_agent(
-                agent, dry_run, run_date, run_type, headless
+            r1_record, r2_records, r3_records = await _run_single_agent(
+                agent, dry_run, run_date, run_type, headless, mode=mode
             )
         except Exception as exc:
             log.error(f"[Cigna] {agent['name']}: unhandled error — {exc}", exc_info=True)
-            r1_record = _failed_r1(agent["name"], run_date, run_type, str(exc))
+            r1_record  = _failed_r1(agent["name"], run_date, run_type, str(exc))
             r2_records = []
+            r3_records = []
 
         if r1_record:
             all_r1.append(r1_record)
         all_r2.extend(r2_records)
+        all_r3.extend(r3_records)
 
     success_count = sum(1 for r in all_r1 if r["status"] == "success")
 
@@ -436,6 +482,8 @@ async def _run_all_agents_async(
         success_r1 = [r for r in all_r1 if r["status"] == "success"]
         write_r1_xlsx(success_r1, "Cigna", log)
         append_deactivated_xlsx(all_r2, "Cigna", log)
+        if mode == "roster":
+            write_active_members_xlsx(all_r3, "Cigna", log)
         # State file — only on full success (CLAUDE.md §10)
         if success_count == len(agents):
             _update_state_file(run_date)
@@ -446,7 +494,7 @@ async def _run_all_agents_async(
             )
         log.info(
             f"[Cigna] Run complete — {success_count}/{len(agents)} agents succeeded, "
-            f"{len(all_r2)} R2 records written"
+            f"{len(all_r2)} R2 records, {len(all_r3)} R3 records written"
         )
     else:
         log.info("[Cigna] DRY RUN — XLSX write and state update skipped")
@@ -480,6 +528,7 @@ def run_cigna(
     dry_run: bool = False,
     agent_filter: int | None = None,
     headless: bool = False,
+    mode: str = "regular",
 ) -> tuple[list[dict], list[dict]]:
     """
     Public API. Called by launcher or standalone.
@@ -503,7 +552,7 @@ def run_cigna(
         log.info(f"[Cigna] Single-agent mode: {agents[0]['name']}")
 
     return asyncio.run(
-        _run_all_agents_async(agents, dry_run, run_date, rt, headless)
+        _run_all_agents_async(agents, dry_run, run_date, rt, headless, mode=mode)
     )
 
 
@@ -518,6 +567,8 @@ if __name__ == "__main__":
     parser.add_argument("--agent", type=int, default=None)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--headless", action="store_true")
+    parser.add_argument("--mode", choices=["regular", "roster"], default="regular",
+                        help="regular (R1+R2) or roster (R1+R2+R3, All Policies export)")
     args = parser.parse_args()
 
-    run_cigna(dry_run=args.dry_run, agent_filter=args.agent, headless=args.headless)
+    run_cigna(dry_run=args.dry_run, agent_filter=args.agent, headless=args.headless, mode=args.mode)

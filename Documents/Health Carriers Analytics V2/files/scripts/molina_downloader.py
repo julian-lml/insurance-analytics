@@ -51,6 +51,7 @@ from scripts.utils import (
     run_type,
     write_r1_xlsx,
     append_deactivated_xlsx,
+    write_active_members_xlsx,
 )
 
 load_dotenv()
@@ -416,6 +417,7 @@ def _run_single_agent(
     last_run_date: str | None,
     dry_run: bool,
     log: logging.Logger,
+    mode: str = "regular",
 ) -> dict:
     """
     Runs the full portal flow for ONE agent.
@@ -511,17 +513,27 @@ def _run_single_agent(
         rec.setdefault("last_status", "Terminated")
         rec.setdefault("detection_method", "file_extract")
 
+    # R3 — roster mode only: derive from same CSV, zero extra portal traffic
+    r3_records: list[dict] = []
+    if mode == "roster":
+        try:
+            r3_records = _build_molina_r3_records(csv_path, agent_name, RUN_DATE)
+            log.info(f"[{agent_name}] R3 roster: {len(r3_records)} active member records")
+        except Exception as exc:
+            log.warning(f"[{agent_name}] R3 build failed (non-fatal): {exc}")
+
     duration = round(time.time() - start, 2)
     active_count = sum(r["active_members"] for r in r1_records)
     log.info(
         f"[{agent_name}] Done — {active_count} active, "
-        f"{len(r2_records)} deactivated, {duration}s"
+        f"{len(r2_records)} deactivated, {len(r3_records)} roster, {duration}s"
     )
 
     return {
         "agent_name": agent_name,
         "r1": r1_records,
         "r2": r2_records,
+        "r3": r3_records,
         "status": "success",
         "error": None,
         "csv_path": csv_path,
@@ -545,6 +557,7 @@ def _agent_result(agent_name: str, status: str, error: str, start: float) -> dic
             "duration_seconds": duration,
         }],
         "r2": [],
+        "r3": [],
         "status": status,
         "error": error,
         "csv_path": None,
@@ -556,7 +569,7 @@ def _agent_result(agent_name: str, status: str, error: str, start: float) -> dic
 # Main entry point
 # ─────────────────────────────────────────────────────────────────────────────
 
-def run_molina(dry_run: bool = False, agent_filter: int | None = None) -> dict:
+def run_molina(dry_run: bool = False, agent_filter: int | None = None, mode: str = "regular") -> dict:
     """
     Orchestrates the full Molina run across all agents.
     Called by main.py (Phase 8) or standalone.
@@ -615,20 +628,22 @@ def run_molina(dry_run: bool = False, agent_filter: int | None = None) -> dict:
         log.info(f"Agent filter active: running only agent #{agent_filter} ({agents[0]['name']})")
 
     last_run_date = read_last_run_date()
-    log.info(f"Run: {RUN_DATE} ({RUN_TYPE}) | last_run: {last_run_date or 'none'}")
+    log.info(f"Run: {RUN_DATE} ({RUN_TYPE}) | mode: {mode} | last_run: {last_run_date or 'none'}")
     log.info(f"Agents to process: {len(agents)}")
 
     # ── Loop through agents ───────────────────────────────────────────────
     all_r1 = []
     all_r2 = []
+    all_r3 = []
     agents_succeeded = []
     agents_failed = []
 
     for i, agent in enumerate(agents):
-        result = _run_single_agent(agent, i, last_run_date, dry_run, log)
+        result = _run_single_agent(agent, i, last_run_date, dry_run, log, mode=mode)
 
         all_r1.extend(result["r1"])
         all_r2.extend(result["r2"])
+        all_r3.extend(result.get("r3", []))
 
         if result["status"] == "success":
             agents_succeeded.append(result["agent_name"])
@@ -681,20 +696,79 @@ def run_molina(dry_run: bool = False, agent_filter: int | None = None) -> dict:
     elif dry_run:
         log.info("Dry run — state file NOT updated")
 
-    # ── Write XLSX outputs (merge-on-write for R1; append+dedup for R2) ───
+    # ── Write XLSX outputs (merge-on-write for R1; append+dedup for R2; R3 roster only) ───
     if not dry_run and overall_status in ("success", "partial"):
         success_r1 = [r for r in all_r1 if r.get("status") == "success"]
         write_r1_xlsx(success_r1, "Molina", log)
         append_deactivated_xlsx(all_r2, "Molina", log)
+        if mode == "roster":
+            write_active_members_xlsx(all_r3, "Molina", log)
+            log.info("Molina | R3 roster: %d total records written", len(all_r3))
 
     return {
         "r1":     all_r1,
         "r2":     all_r2,
+        "r3":     all_r3,
         "status": overall_status,
         "error":  None if overall_status == "success" else f"Failed: {', '.join(agents_failed)}",
         "agents_succeeded": agents_succeeded,
         "agents_failed":    agents_failed,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# R3 builder (roster mode only)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _build_molina_r3_records(csv_path: Path, agent_name: str, run_date: str) -> list[dict]:
+    """
+    Generate R3 records from an already-downloaded Molina CSV.
+    Filters: Status in active_statuses (Active, Pending Payment, Pending Binder).
+    agent_name is always from agents.yaml — never from broker columns.
+    Called only when mode='roster'.
+    """
+    cols   = MCFG["columns"]
+    active = MCFG["active_statuses"]
+
+    try:
+        df = pd.read_csv(csv_path, dtype=str, encoding="windows-1252")
+    except UnicodeDecodeError:
+        df = pd.read_csv(csv_path, dtype=str)
+    df.columns = df.columns.str.strip()
+
+    active_df = df[df[cols["status"]].isin(active)].copy()
+
+    records: list[dict] = []
+    for _, row in active_df.iterrows():
+        dob_raw = row.get(cols["dob"])
+        try:
+            dob_str = pd.to_datetime(dob_raw).strftime("%m/%d/%Y") if pd.notna(dob_raw) else None
+        except Exception:
+            dob_str = str(dob_raw).strip() if pd.notna(dob_raw) else None
+
+        eff_raw = row.get(cols.get("effective_date", "Effective_date"))
+        try:
+            eff_str = pd.to_datetime(eff_raw).strftime("%Y-%m-%d") if pd.notna(eff_raw) else None
+        except Exception:
+            eff_str = str(eff_raw).strip() if pd.notna(eff_raw) else None
+
+        sub_id = row.get(cols["subscriber_id"])
+        policy_num = str(sub_id).strip() if pd.notna(sub_id) and str(sub_id).strip() else None
+
+        records.append({
+            "run_date":            run_date,
+            "carrier":             "Molina",
+            "agent_name":          agent_name,
+            "member_first_name":   str(row.get(cols["member_first"], "") or "").strip(),
+            "member_last_name":    str(row.get(cols["member_last"],  "") or "").strip(),
+            "member_dob":          dob_str,
+            "state":               str(row.get(cols["state"], "") or "").strip(),
+            "policy_number":       policy_num,
+            "plan_name":           str(row.get(cols.get("product", "Product"), "") or "").strip(),
+            "coverage_start_date": eff_str,
+            "policy_status":       str(row.get(cols["status"], "") or "").strip(),
+        })
+    return records
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -765,12 +839,27 @@ if __name__ == "__main__":
             print("Error: --agent requires a number (0-based index)")
             sys.exit(1)
 
+    # Parse --mode regular|roster
+    mode = "regular"
+    if "--mode" in sys.argv:
+        idx = sys.argv.index("--mode")
+        if idx + 1 < len(sys.argv):
+            mode = sys.argv[idx + 1]
+            if mode not in ("regular", "roster"):
+                print(f"Error: --mode must be 'regular' or 'roster', got '{mode}'")
+                sys.exit(1)
+        else:
+            print("Error: --mode requires a value (regular or roster)")
+            sys.exit(1)
+
     if dry_run:
         print("[DRY RUN] No Sheets write, no state update\n")
     if agent_filter is not None:
         print(f"[AGENT FILTER] Running only agent #{agent_filter}\n")
+    if mode == "roster":
+        print("[ROSTER MODE] R1 + R2 + R3 (full Book of Business)\n")
 
-    result = run_molina(dry_run=dry_run, agent_filter=agent_filter)
+    result = run_molina(dry_run=dry_run, agent_filter=agent_filter, mode=mode)
 
     print("\n" + "=" * 65)
     print(f"  STATUS: {result['status'].upper()}")

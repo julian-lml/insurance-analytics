@@ -222,3 +222,67 @@ def append_deactivated_xlsx(
         log.info("%s | R2 XLSX written → %s (%d rows)", carrier, _R2_OUTPUT, len(combined))
     except Exception as exc:
         log.warning("%s | R2 XLSX write failed (non-fatal): %s", carrier, exc)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# R3 XLSX — append + dedup (roster mode only)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_R3_OUTPUT = ROOT / "data" / "output" / "active_members_all.xlsx"
+_R3_DEDUP_KEY = ["carrier", "policy_number", "run_date"]
+
+
+def write_active_members_xlsx(
+    r3_records: list[dict],
+    carrier: str,
+    log: logging.Logger | None = None,
+) -> None:
+    """
+    Append R3 records to active_members_all.xlsx with dedup.
+    Dedup key: (carrier, policy_number, run_date). Existing rows win.
+    Rows with null policy_number are dropped (cannot dedup safely).
+    Called ONLY when mode='roster'. Never called in regular mode.
+    """
+    log = log or logging.getLogger(__name__)
+    if not r3_records:
+        log.info("%s | R3 XLSX: no records to write", carrier)
+        return
+
+    new_df = pd.DataFrame(r3_records)
+
+    before = len(new_df)
+    new_df = new_df[
+        new_df["policy_number"].notna()
+        & (new_df["policy_number"].astype(str).str.strip() != "")
+    ]
+    dropped_null = before - len(new_df)
+    if dropped_null:
+        log.warning("%s | R3: dropped %d rows with null policy_number", carrier, dropped_null)
+
+    if new_df.empty:
+        log.info("%s | R3 XLSX: nothing to append after null-policy filter", carrier)
+        return
+
+    _R3_OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+
+    if _R3_OUTPUT.exists():
+        existing_df = pd.read_excel(_R3_OUTPUT, engine="openpyxl")
+        combined = pd.concat([existing_df, new_df], ignore_index=True)
+        before_dedup = len(combined)
+        combined = combined.drop_duplicates(subset=_R3_DEDUP_KEY, keep="first")
+        deduped = before_dedup - len(combined)
+        net_new = len(combined) - len(existing_df)
+        log.info(
+            "%s | R3: existing=%d, candidates=%d, deduped=%d, net_new=%d",
+            carrier, len(existing_df), len(new_df), deduped, net_new,
+        )
+    else:
+        combined = new_df.drop_duplicates(subset=_R3_DEDUP_KEY, keep="first")
+        log.info("%s | R3: first write, %d rows", carrier, len(combined))
+
+    try:
+        with pd.ExcelWriter(_R3_OUTPUT, engine="openpyxl") as writer:
+            combined.to_excel(writer, index=False, sheet_name="Active Roster")
+        log.info("%s | R3 XLSX written → %s (%d rows)", carrier, _R3_OUTPUT, len(combined))
+    except Exception as exc:
+        log.warning("%s | R3 XLSX write failed (non-fatal): %s", carrier, exc)

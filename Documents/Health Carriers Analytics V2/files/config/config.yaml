@@ -13,7 +13,7 @@ selenium:
 # late-arriving cancellations. Dedup key in utils.append_deactivated_xlsx
 # keeps re-capture safe. See scripts/utils.get_r2_start_date.
 r2:
-  start_date: "2025-12-01"
+  start_date: "2026-01-01"
 
 carriers:
 
@@ -45,6 +45,8 @@ carriers:
       hix_id:         "HIX_ID"
       dob:            "dob"
       state:          "State"
+      product:        "Product"          # R3: plan_name
+      effective_date: "Effective_date"   # R3: coverage_start_date
 
     active_statuses:
       - "Active"
@@ -68,11 +70,16 @@ carriers:
       export_button:     "button.dt-button[title='Download as CSV']"
  
     columns:
-      policy_term_date:  "Policy Term Date"    # confirmed ✓
-      first_name:        "Insured First Name"   # confirmed ✓
-      last_name:         "Insured Last Name"    # confirmed ✓
-      policy_number:     "Policy Number"        # confirmed ✓
- 
+      policy_term_date:     "Policy Term Date"       # confirmed ✓
+      first_name:           "Insured First Name"     # confirmed ✓
+      last_name:            "Insured Last Name"      # confirmed ✓
+      policy_number:        "Policy Number"          # confirmed ✓
+      state:                "State"
+      member_dob:           "Member Date Of Birth"
+      policy_status:        "Policy Status"          # "Active" for R3, non-Active for R2 (roster)
+      coverage_start_date:  "Policy Effective Date"  # R3
+      plan_name:            "Plan Name"              # R3
+
     cancelled_status: "Cancelled"
 
   cigna:
@@ -109,6 +116,9 @@ carriers:
       policy_number:    "Subscriber ID (Detail Case #)"
       state:            "State"
       writing_agent:    "Writing Agent"
+      policy_status:    "Policy Status"    # "Active" for R3, "Terminated" for R2 (roster)
+      effective_date:   "Effective Date"   # R3: coverage_start_date
+      plan_name:        "Plan Name"        # R3
       # member_dob: NOT in Cigna export — always null (CLAUDE.md §8.12)
 
   united:
@@ -125,6 +135,7 @@ carriers:
       state:            "memberState"
       member_dob:       "dateOfBirth"         # Available — format MM/DD/YYYY
       policy_status:    "planStatus"          # 'A' = Active, 'I' = Inactive/Terminated
+      product:          "product"             # R3: plan_name
       # policy_number: ⚠ no subscriber ID column confirmed — composite key (§8.20)
 
   oscar:
@@ -143,10 +154,12 @@ carriers:
       modal_close:     "button[aria-label='Close']"
 
     columns:
-      lives:          "Lives"
-      policy_status:  "Policy status"
-      member_name:    "Member name"
-      member_id:      "Member ID"
-      date_of_birth:  "Date of birth"
-      state:          "State"
-      coverage_end:   "Coverage end date"
+      lives:           "Lives"
+      policy_status:   "Policy status"
+      member_name:     "Member name"
+      member_id:       "Member ID"
+      date_of_birth:   "Date of birth"
+      state:           "State"
+      coverage_end:    "Coverage end date"
+      plan:            "Plan"                # R3: plan_name
+      coverage_start:  "Coverage start date" # R3: coverage_start_date

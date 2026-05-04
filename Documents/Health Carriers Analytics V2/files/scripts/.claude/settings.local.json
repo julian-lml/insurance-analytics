@@ -2,7 +2,12 @@
   "permissions": {
     "allow": [
       "Read(//c/Users/cec19/Documents/Health Carriers Analytics V2/files/**)",
-      "Bash(python scripts/ambetter_bot.py --agent 0 --dry-run)"
+      "Bash(python scripts/ambetter_bot.py --agent 0 --dry-run)",
+      "Bash(python scripts/sheets_writer.py --dry-run --mode regular)",
+      "Bash(git -C \"C:/Users/cec19\" ls-files \"Documents/Health Carriers Analytics V2/CLAUDE.md\")",
+      "Bash(git -C \"C:/Users/cec19\" status --short \"Documents/Health Carriers Analytics V2/CLAUDE.md\")",
+      "Bash(git -C \"C:/Users/cec19\" status --short -- \"Documents/Health Carriers Analytics V2/\")",
+      "Bash(git *)"
     ]
   }
 }

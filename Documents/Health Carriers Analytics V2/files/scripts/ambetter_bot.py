@@ -60,6 +60,7 @@ from scripts.utils import (
     get_r2_start_date,
     write_r1_xlsx,
     append_deactivated_xlsx,
+    write_active_members_xlsx,
 )
 
 log = logging.getLogger(__name__)
@@ -80,11 +81,16 @@ TIMEOUT       = _SEL_CFG.get("element_timeout", 15)
 DL_TIMEOUT    = _SEL_CFG.get("download_timeout", 120)
 
 # Column names
-_COLS          = _AMB["columns"]
-COL_TERM_DATE  = _COLS["policy_term_date"]
-COL_FIRST_NAME = _COLS["first_name"]
-COL_LAST_NAME  = _COLS["last_name"]
-COL_POLICY_NUM = _COLS["policy_number"]
+_COLS                = _AMB["columns"]
+COL_TERM_DATE        = _COLS["policy_term_date"]
+COL_FIRST_NAME       = _COLS["first_name"]
+COL_LAST_NAME        = _COLS["last_name"]
+COL_POLICY_NUM       = _COLS["policy_number"]
+COL_STATE            = _COLS["state"]
+COL_MEMBER_DOB       = _COLS["member_dob"]
+COL_POLICY_STATUS    = _COLS["policy_status"]
+COL_COVERAGE_START   = _COLS["coverage_start_date"]
+COL_PLAN_NAME        = _COLS["plan_name"]
 
 # Selectors — read once, used throughout
 _SELS            = _AMB["selectors"]
@@ -295,15 +301,19 @@ def _scrape_r1(driver: webdriver.Chrome, agent_name: str,
     }
 
 
-def _download_cancelled_csv(
-    driver: webdriver.Chrome, dl_dir: Path, agent_name: str
+def _download_policies_csv(
+    driver: webdriver.Chrome, dl_dir: Path, agent_name: str,
+    filter_param: str = "cancelled",
 ) -> Path:
     """
-    Paginated export of all cancelled policies for one agent.
+    Paginated export of policies for one agent.
 
-    The endpoint returns 334 rows per page via an offset parameter.
-    We loop offset=0, 334, 668, ... until a page returns fewer than
-    PAGE_SIZE rows, then concatenate all pages into a single CSV.
+    filter_param='cancelled' — regular mode: only cancelled/terminated members.
+    filter_param='all'       — roster mode:  full Book of Business.
+
+    The endpoint returns rows per page via an offset parameter.
+    Regular mode page size confirmed at 334 (CLAUDE.md §8.16).
+    Roster mode (filter=all): page size logged on first request and may differ.
 
     Salesforce Lightning SPA kills ChromeDriver on navigation — we bypass
     Selenium and transfer cookies to a requests session (CLAUDE.md §8.1).
@@ -319,7 +329,7 @@ def _download_cancelled_csv(
     from bs4 import BeautifulSoup
 
     BASE_URL  = "https://broker.ambetterhealth.com"
-    PAGE_SIZE = 334  # rows per page, confirmed from live data
+    PAGE_SIZE = 334  # confirmed for filter=cancelled; verified dynamically for filter=all
 
     # ── Build requests session from the live Selenium cookies ─────────────────
     import urllib3
@@ -337,11 +347,12 @@ def _download_cancelled_csv(
     # ── Pagination loop ────────────────────────────────────────────────────────
     all_rows: list[pd.DataFrame] = []
     offset = 0
+    effective_page_size: int | None = None  # determined from first response
 
     while True:
         url = (
             BASE_URL + "/apex/BC_VFP02_PolicyList_CSV"
-            f"?filter=cancelled&offset={offset}"
+            f"?filter={filter_param}&offset={offset}"
         )
         r = session.get(url, timeout=60, verify=False)
 
@@ -395,13 +406,29 @@ def _download_cancelled_csv(
         if page_df.empty:
             break
 
-        log.info("ambetter | [%s] page offset=%d rows=%d", agent_name, offset, len(page_df))
+        log.info("ambetter | [%s] page offset=%d rows=%d filter=%s", agent_name, offset, len(page_df), filter_param)
+
+        # On first page: determine effective page size (may differ for filter=all)
+        if effective_page_size is None:
+            effective_page_size = len(page_df)
+            if filter_param == "all" and effective_page_size == PAGE_SIZE:
+                log.warning(
+                    "ambetter | [%s] roster first page=%d rows matches regular PAGE_SIZE=%d "
+                    "— verify this is correct for filter=all (CLAUDE.md §8.16)",
+                    agent_name, effective_page_size, PAGE_SIZE,
+                )
+            elif filter_param == "all":
+                log.info(
+                    "ambetter | [%s] roster page size=%d (filter=all, differs from regular %d)",
+                    agent_name, effective_page_size, PAGE_SIZE,
+                )
+
         all_rows.append(page_df)
 
-        if len(page_df) < PAGE_SIZE:
+        if len(page_df) < effective_page_size:
             break  # last page
 
-        offset += PAGE_SIZE
+        offset += effective_page_size
 
     if not all_rows:
         raise RuntimeError(f"ambetter | [{agent_name}] no cancelled records retrieved")
@@ -411,7 +438,8 @@ def _download_cancelled_csv(
 
     # Write combined CSV to disk for audit trail and downstream processing
     safe_name = agent_name.lower().replace(" ", "_")
-    combined_path = dl_dir / f"cancelled_{safe_name}_all.csv"
+    prefix = "all" if filter_param == "all" else "cancelled"
+    combined_path = dl_dir / f"{prefix}_{safe_name}_all.csv"
     full_df.to_csv(combined_path, index=False)
 
     return combined_path
@@ -539,6 +567,74 @@ def _build_r2_records(
     return records
 
 
+# ── Roster mode: split filter=all CSV into R2 + R3 ───────────────────────────
+
+def _split_all_policies(
+    csv_path: Path,
+    agent_name: str,
+    run_date: date,
+) -> tuple[list[dict], list[dict]]:
+    """
+    Split a filter=all Ambetter CSV into R2 (non-Active + date filter) and R3 (Active).
+    agent_name always from agents.yaml — never from 'Payable Agent' column (CLAUDE.md §8.3).
+    Returns (r2_records, r3_records).
+    """
+    df = pd.read_csv(csv_path, dtype=str)
+    df.columns = df.columns.str.strip()
+
+    period_start = get_r2_start_date()
+    total_rows = len(df)
+
+    # R2: non-Active rows with term date >= r2_start
+    non_active_df = df[df[COL_POLICY_STATUS] != "Active"].copy()
+    non_active_df["_term_dt"] = pd.to_datetime(non_active_df[COL_TERM_DATE], errors="coerce").dt.date
+    r2_df = non_active_df[non_active_df["_term_dt"] >= period_start]
+
+    r2_records: list[dict] = []
+    for _, row in r2_df.iterrows():
+        first = str(row.get(COL_FIRST_NAME, "") or "").strip()
+        last  = str(row.get(COL_LAST_NAME,  "") or "").strip()
+        r2_records.append({
+            "run_date":          run_date.isoformat(),
+            "carrier":           "Ambetter",
+            "agent_name":        agent_name,
+            "member_name":       f"{first} {last}".strip(),
+            "member_dob":        str(row.get(COL_MEMBER_DOB, "") or "").strip() or None,
+            "state":             str(row.get(COL_STATE, "") or "").strip() or None,
+            "coverage_end_date": row["_term_dt"].isoformat() if row["_term_dt"] else None,
+            "policy_number":     str(row.get(COL_POLICY_NUM, "") or "").strip() or None,
+            "last_status":       str(row.get(COL_POLICY_STATUS, "") or "").strip() or "Cancelled",
+            "detection_method":  "download_filter",
+        })
+
+    # R3: Active rows
+    active_df = df[df[COL_POLICY_STATUS] == "Active"].copy()
+
+    r3_records: list[dict] = []
+    for _, row in active_df.iterrows():
+        first = str(row.get(COL_FIRST_NAME, "") or "").strip()
+        last  = str(row.get(COL_LAST_NAME,  "") or "").strip()
+        r3_records.append({
+            "run_date":            run_date.isoformat(),
+            "carrier":             "Ambetter",
+            "agent_name":          agent_name,
+            "member_first_name":   first,
+            "member_last_name":    last,
+            "member_dob":          str(row.get(COL_MEMBER_DOB, "") or "").strip() or None,
+            "state":               str(row.get(COL_STATE, "") or "").strip() or None,
+            "policy_number":       str(row.get(COL_POLICY_NUM, "") or "").strip() or None,
+            "plan_name":           str(row.get(COL_PLAN_NAME, "") or "").strip() or None,
+            "coverage_start_date": str(row.get(COL_COVERAGE_START, "") or "").strip() or None,
+            "policy_status":       "Active",
+        })
+
+    log.info(
+        "ambetter | [%s] filter=all split: total=%d, R2=%d (non-active >= %s), R3=%d (active)",
+        agent_name, total_rows, len(r2_records), period_start, len(r3_records),
+    )
+    return r2_records, r3_records
+
+
 # ── Selector diagnostics ──────────────────────────────────────────────────────
 def _debug_selectors(agent: dict) -> None:
     """
@@ -581,10 +677,11 @@ def _run_single_agent(
     run_date: date,
     run_type: str,
     last_run_date: date | None,
+    mode: str = "regular",
 ) -> dict:
     """
-    Runs one agent through login → R1 → R2.
-    Returns {'r1': dict, 'r2': [...], 'success': bool}.
+    Runs one agent through login → R1 → R2 (regular) or R1 → R2 + R3 (roster).
+    Returns {'r1': dict, 'r2': [...], 'r3': [...], 'success': bool}.
     3 attempts, backoff 5s / 15s / 45s.
     """
     name    = agent["name"]
@@ -594,23 +691,31 @@ def _run_single_agent(
 
     for attempt in range(1, 4):
         try:
-            log.info("ambetter | [%s] attempt %d/3", name, attempt)
+            log.info("ambetter | [%s] attempt %d/3 mode=%s", name, attempt, mode)
             driver = _build_driver(dl_dir)
 
             _login(driver, agent)
-            r1         = _scrape_r1(driver, name, run_date, run_type)
-            csv_path   = _download_cancelled_csv(driver, dl_dir, name)
-            r2_records = _build_r2_records(csv_path, name, last_run_date, run_date)
+            r1 = _scrape_r1(driver, name, run_date, run_type)
+
+            if mode == "roster":
+                # Roster: download full BOB (filter=all), split into R2 + R3
+                csv_path   = _download_policies_csv(driver, dl_dir, name, filter_param="all")
+                r2_records, r3_records = _split_all_policies(csv_path, name, run_date)
+            else:
+                # Regular: download cancelled only, R2 only
+                csv_path   = _download_policies_csv(driver, dl_dir, name, filter_param="cancelled")
+                r2_records = _build_r2_records(csv_path, name, last_run_date, run_date)
+                r3_records = []
 
             elapsed = round(time.time() - t_start, 2)
             r1["duration_seconds"] = elapsed
             driver.quit()
 
             log.info(
-                "ambetter | [%s] OK — %d active | %d deactivated | %.1fs",
-                name, r1["active_members"], len(r2_records), elapsed,
+                "ambetter | [%s] OK — %d active | %d deactivated | %d roster | %.1fs",
+                name, r1["active_members"], len(r2_records), len(r3_records), elapsed,
             )
-            return {"r1": r1, "r2": r2_records, "success": True}
+            return {"r1": r1, "r2": r2_records, "r3": r3_records, "success": True}
 
         except Exception as exc:
             log.error("ambetter | [%s] attempt %d failed: %s", name, attempt, exc)
@@ -630,12 +735,14 @@ def _run_single_agent(
                 return {
                     "r1": _failure_r1(name, run_date, run_type, t_start, str(exc)),
                     "r2": [],
+                    "r3": [],
                     "success": False,
                 }
 
     return {
         "r1": _failure_r1(agent["name"], run_date, run_type, t_start, "unexpected loop exit"),
         "r2": [],
+        "r3": [],
         "success": False,
     }
 
@@ -655,7 +762,7 @@ def _failure_r1(agent_name: str, run_date: date, run_type: str,
 
 
 # ── Main entry point ──────────────────────────────────────────────────────────
-def run_ambetter(dry_run: bool = False, agent_filter: int | None = None) -> dict:
+def run_ambetter(dry_run: bool = False, agent_filter: int | None = None, mode: str = "regular") -> dict:
     """
     Public API. Called by launcher or standalone.
 
@@ -684,13 +791,15 @@ def run_ambetter(dry_run: bool = False, agent_filter: int | None = None) -> dict
 
     all_r1:    list[dict] = []
     all_r2:    list[dict] = []
+    all_r3:    list[dict] = []
     failed:    list[str]  = []
     succeeded: list[str]  = []
 
     for agent in agents:
-        result = _run_single_agent(agent, run_date, rt, last_run)
+        result = _run_single_agent(agent, run_date, rt, last_run, mode=mode)
         all_r1.append(result["r1"])
         all_r2.extend(result["r2"])
+        all_r3.extend(result.get("r3", []))
         (succeeded if result["success"] else failed).append(agent["name"])
 
     total_active = sum(
@@ -719,7 +828,10 @@ def run_ambetter(dry_run: bool = False, agent_filter: int | None = None) -> dict
         success_r1 = [r for r in all_r1 if r["status"] == "success"]
         write_r1_xlsx(success_r1, "Ambetter", log)
         append_deactivated_xlsx(all_r2, "Ambetter", log)
-    return {"r1": all_r1, "r2": all_r2}
+        if mode == "roster":
+            write_active_members_xlsx(all_r3, "Ambetter", log)
+            log.info("ambetter | R3 roster: %d total records written", len(all_r3))
+    return {"r1": all_r1, "r2": all_r2, "r3": all_r3}
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -729,6 +841,8 @@ if __name__ == "__main__":
                         help="Run a single agent by 0-based index (e.g. --agent 0)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Skip state file update")
+    parser.add_argument("--mode", choices=["regular", "roster"], default="regular",
+                        help="regular (R1+R2) or roster (R1+R2+R3, filter=all)")
     parser.add_argument("--debug-selectors", action="store_true",
                         help="Load login page, save page source for selector diagnosis, then exit")
     args = parser.parse_args()
@@ -739,7 +853,7 @@ if __name__ == "__main__":
         _debug_selectors(agents[0])   # any agent creds work — just needs the login page
         sys.exit(0)
 
-    result = run_ambetter(dry_run=args.dry_run, agent_filter=args.agent)
+    result = run_ambetter(dry_run=args.dry_run, agent_filter=args.agent, mode=args.mode)
 
     print("\n-- R1  Active Members --------------------------------------------------")
     for r in result["r1"]:

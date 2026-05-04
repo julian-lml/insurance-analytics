@@ -49,6 +49,7 @@ from scripts.utils import (
     get_r2_start_date,
     write_r1_xlsx,
     append_deactivated_xlsx,
+    write_active_members_xlsx,
 )
 
 log = logging.getLogger(__name__)
@@ -59,13 +60,15 @@ _CFG_PATH = ROOT / "config" / "config.yaml"
 with open(_CFG_PATH, encoding="utf-8") as _f:
     _CFG = yaml.safe_load(_f)
 _COLS      = _CFG["carriers"]["oscar"]["columns"]
-COL_LIVES  = _COLS["lives"]
-COL_STATUS = _COLS["policy_status"]
-COL_NAME   = _COLS["member_name"]
-COL_ID     = _COLS["member_id"]
-COL_DOB    = _COLS["date_of_birth"]
-COL_STATE  = _COLS["state"]
-COL_END    = _COLS["coverage_end"]
+COL_LIVES         = _COLS["lives"]
+COL_STATUS        = _COLS["policy_status"]
+COL_NAME          = _COLS["member_name"]
+COL_ID            = _COLS["member_id"]
+COL_DOB           = _COLS["date_of_birth"]
+COL_STATE         = _COLS["state"]
+COL_END           = _COLS["coverage_end"]
+COL_PLAN          = _COLS["plan"]
+COL_COVERAGE_START = _COLS["coverage_start"]
 
 # ─── Selectors ────────────────────────────────────────────────────────────────
 
@@ -149,6 +152,43 @@ def _build_r2_records(
     return records
 
 
+def _build_r3_records(
+    df: pd.DataFrame,
+    agent_name: str,
+    run_date: str,
+) -> list[dict]:
+    """R3 schema — CLAUDE.md §5. Active rows (everything except Inactive)."""
+    active_df = df[df[COL_STATUS].str.strip().str.lower() != "inactive"].copy()
+
+    records = []
+    for _, row in active_df.iterrows():
+        raw_name  = str(row.get(COL_NAME, "") or "").strip()
+        parts     = raw_name.split(" ", 1)
+        first     = parts[0] if parts else ""
+        last      = parts[1] if len(parts) > 1 else ""
+
+        dob_raw = row.get(COL_DOB)
+        try:
+            dob_str = pd.to_datetime(dob_raw, errors="coerce").strftime("%m/%d/%Y") if pd.notna(dob_raw) else None
+        except Exception:
+            dob_str = str(dob_raw).strip() if pd.notna(dob_raw) else None
+
+        records.append({
+            "run_date":            run_date,
+            "carrier":             "Oscar",
+            "agent_name":          agent_name,
+            "member_first_name":   first,
+            "member_last_name":    last,
+            "member_dob":          dob_str,
+            "state":               str(row.get(COL_STATE, "") or "").strip() or None,
+            "policy_number":       str(row.get(COL_ID, "") or "").strip() or None,
+            "plan_name":           str(row.get(COL_PLAN, "") or "").strip() or None,
+            "coverage_start_date": str(row.get(COL_COVERAGE_START, "") or "").strip() or None,
+            "policy_status":       str(row.get(COL_STATUS, "") or "").strip(),
+        })
+    return records
+
+
 def _failed_r1(
     agent_name: str,
     run_date: str,
@@ -175,8 +215,10 @@ def _process_csv(
     run_date: str,
     run_type: str,
     duration: float,
-) -> tuple[dict, list[dict]]:
-    """Parse downloaded CSV → (r1_record, r2_records)."""
+    mode: str = "regular",
+) -> tuple[dict, list[dict], list[dict]]:
+    """Parse downloaded CSV → (r1_record, r2_records, r3_records).
+    r3_records is populated only when mode='roster'."""
     df = pd.read_csv(csv_path)
 
     required = {COL_STATUS, COL_LIVES}
@@ -191,7 +233,8 @@ def _process_csv(
 
     r1 = _build_r1_record(df, agent_name, run_date, run_type, duration)
     r2 = _build_r2_records(df, agent_name, run_date)
-    return r1, r2
+    r3 = _build_r3_records(df, agent_name, run_date) if mode == "roster" else []
+    return r1, r2, r3
 
 
 # ─── Modal dismissal ──────────────────────────────────────────────────────────
@@ -235,7 +278,8 @@ async def _run_single_agent(
     run_date: str,
     run_type: str,
     headless: bool,
-) -> tuple[dict, list[dict]]:
+    mode: str = "regular",
+) -> tuple[dict, list[dict], list[dict]]:
     """
     Full browser + CSV flow for one Oscar agent.
     Returns (r1_record, r2_records).
@@ -329,13 +373,13 @@ async def _run_single_agent(
     duration = time.monotonic() - t_start
 
     # ── Process CSV ───────────────────────────────────────────────────────────
-    r1, r2 = _process_csv(csv_path, agent_name, run_date, run_type, duration)
+    r1, r2, r3 = _process_csv(csv_path, agent_name, run_date, run_type, duration, mode=mode)
 
     log.info(
         f"[Oscar] {agent_name}: R1 active_members={r1['active_members']} "
-        f"R2 records={len(r2)} period_start={get_r2_start_date()}"
+        f"R2 records={len(r2)} R3 records={len(r3)} period_start={get_r2_start_date()}"
     )
-    return r1, r2
+    return r1, r2, r3
 
 
 # ─── All-agents loop ──────────────────────────────────────────────────────────
@@ -346,17 +390,20 @@ async def _run_all_agents_async(
     run_date: str,
     run_type: str,
     headless: bool,
+    mode: str = "regular",
 ) -> tuple[list[dict], list[dict]]:
     all_r1: list[dict] = []
     all_r2: list[dict] = []
+    all_r3: list[dict] = []
 
     for agent in agents:
         try:
-            r1, r2 = await _run_single_agent(
-                agent, dry_run, run_date, run_type, headless
+            r1, r2, r3 = await _run_single_agent(
+                agent, dry_run, run_date, run_type, headless, mode=mode
             )
             all_r1.append(r1)
             all_r2.extend(r2)
+            all_r3.extend(r3)
         except Exception as exc:
             log.error(f"[Oscar] {agent['name']}: unhandled error — {exc}", exc_info=True)
             all_r1.append(
@@ -367,10 +414,12 @@ async def _run_all_agents_async(
         success_r1 = [r for r in all_r1 if r["status"] == "success"]
         write_r1_xlsx(success_r1, "Oscar", log)
         append_deactivated_xlsx(all_r2, "Oscar", log)
+        if mode == "roster":
+            write_active_members_xlsx(all_r3, "Oscar", log)
         log.info(
             f"[Oscar] Run complete — "
             f"{sum(1 for r in all_r1 if r['status'] == 'success')}/{len(all_r1)} agents succeeded, "
-            f"{len(all_r2)} R2 records written"
+            f"{len(all_r2)} R2 records, {len(all_r3)} R3 records written"
         )
     else:
         log.info("[Oscar] DRY RUN — XLSX write skipped")
@@ -404,6 +453,7 @@ def run_oscar(
     dry_run: bool = False,
     agent_filter: int | None = None,
     headless: bool = False,
+    mode: str = "regular",
 ) -> tuple[list[dict], list[dict]]:
     """
     Public API. Called by launcher or standalone.
@@ -426,7 +476,7 @@ def run_oscar(
         log.info(f"[Oscar] Single-agent mode: {agents[0]['name']}")
 
     return asyncio.run(
-        _run_all_agents_async(agents, dry_run, run_date, rt, headless)
+        _run_all_agents_async(agents, dry_run, run_date, rt, headless, mode=mode)
     )
 
 
@@ -443,11 +493,13 @@ if __name__ == "__main__":
             "  python scripts/oscar_bot.py --agent 0\n"
             "  python scripts/oscar_bot.py --agent 0 --dry-run\n"
             "  python scripts/oscar_bot.py --headless --dry-run\n"
+            "  python scripts/oscar_bot.py --agent 0 --dry-run --mode roster\n"
         ),
     )
     parser.add_argument("--agent", type=int, default=None)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--headless", action="store_true")
+    parser.add_argument("--mode", choices=["regular", "roster"], default="regular")
     args = parser.parse_args()
 
-    run_oscar(dry_run=args.dry_run, agent_filter=args.agent, headless=args.headless)
+    run_oscar(dry_run=args.dry_run, agent_filter=args.agent, headless=args.headless, mode=args.mode)

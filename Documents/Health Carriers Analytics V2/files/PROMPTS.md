@@ -6,6 +6,8 @@
 > 2. Start every session with the **MASTER CONTEXT PROMPT** below
 > 3. Then paste the prompt for the phase or debug scenario you need
 > 4. After each session update `## 12. PHASES STATUS` in `CLAUDE.md`
+>
+> **Current phase order:** R (utils.py) → GUI+R3 (launcher + roster) → 7 (Looker Studio) → 9 (Playwright migration)
 
 ---
 
@@ -17,125 +19,130 @@
 Before writing any code, read CLAUDE.md completely. Do not skip any section.
 Then confirm you have read it by answering ALL of the following:
 
-1. What are the two reports this system produces and where does each one go?
+1. What are R1, R2, and R3? What is each report's content, frequency, destination,
+   and output file? Which reports run in regular mode vs roster mode?
 
 2. Which carriers use Playwright and which use Selenium? Why does that split exist
    and when does it change?
 
-3. What does calculate_period_start() return, and why was it changed from the original
-   Friday/Monday logic? Which carriers drove that decision and why?
+3. What does get_r2_start_date() return, and why did it replace calculate_period_start()?
+   Where is the value stored and how do you change it?
 
-4. Where does agent_name come from — the CSV or agents.yaml? Why does this matter
-   for Ambetter specifically?
+4. Where does agent_name always come from? Why does this matter for Ambetter specifically?
 
-5. What is the R2 dedup key and why does it include coverage_end_date?
+5. What is the R2 dedup key? What is the R3 dedup key? Why are they different?
 
-6. What is scripts/utils.py? List every function that must live there. What is the
-   rule about shared functions vs carrier-specific logic?
+6. What is scripts/utils.py? List every function that must live there.
+   What is the rule about shared functions vs carrier-specific logic?
 
-7. Describe the two-step pipeline flow (Step 1: bots, Step 2: sheets_writer).
+7. Describe the two-step regular flow and the three-step roster flow.
    What does sheets_writer read from? Does it receive in-memory records from bots?
 
 8. What is write_r1_xlsx() and why does it merge instead of overwrite?
-   What breaks if a bot resets the entire carrier XLSX during a single-agent rerun?
+   What is write_active_members_xlsx() and when is it called?
 
-9. What is the current phase status — what is done, what is next, in what order?
-   Why is Phase 8 (Task Scheduler) retired?
+9. What does --mode regular vs --mode roster do to each bot?
+   For Ambetter, United, and Cigna — what specifically changes between modes?
+   For Molina and Oscar — what changes between modes?
 
-10. Name the two CRITICAL security issues from §8.20 and the fix for each.
+10. What is the current phase status and order?
+    Why are Phase GUI and Phase R3 combined into one session?
+    Why is Phase 8 retired?
 
-Do not write any code until you have answered all 10 questions correctly.
+11. Name the two CRITICAL security issues from §8.20 and the fix for each.
+
+12. What are the two sections of the GUI launcher? What buttons are in each section?
+    Which buttons trigger confirmation dialogs? What warning does the roster dialog show?
+
+13. What does a null/blank carrier value mean in the Excel sheet, and how do you distinguish
+    a data gap (carry forward) from a deactivated account (zero out)? See §8.26.
+
+Do not write any code until you have answered all 13 questions correctly.
 If CLAUDE.md does not exist, stop and tell me — do not proceed.
 
 Architecture rules that apply to everything you build:
-- Shared functions (calculate_period_start, append_deactivated_xlsx, write_r1_xlsx,
-  run_type, setup_logging, with_retry) live in scripts/utils.py. Never copy them.
+- Shared functions live in scripts/utils.py. Never copy them into bot files.
 - Column names belong in config/config.yaml, not as Python constants in bot files.
 - Never open agents.yaml or config.yaml at module level — only inside functions.
 - Never print passwords. Log usernames only.
 - Log filenames include seconds: run_YYYYMMDD_HHMMSS_{carrier}.log
-- Each bot's public API: run_{carrier}(dry_run, agent_filter). Everything else is private.
-- sheets_writer.py reads from XLSX files on disk. It is never called by bots.
+- Each bot's public API: run_{carrier}(dry_run, agent_filter, mode='regular').
+- sheets_writer.py reads from XLSX files on disk. Never called by bots.
 - write_r1_xlsx() always merges. Never resets. Safe for 1-agent and full runs.
+- write_active_members_xlsx() only called when mode='roster'. Never in regular mode.
+- R3 is additive. mode='regular' output is identical whether or not R3 exists.
+- agent_name always from agents.yaml. Never from CSV columns.
+- Null carrier column = data gap (carry forward) OR deactivated account (zero out). See §8.26.
+  Two+ consecutive nulls for one agent on one carrier = confirm deactivation before carrying forward.
 ```
 
 ---
 
-## ── PHASE R — utils.py Refactor ────────────────────────────────────
+## ── PHASE R — utils.py Refactor + Security ─────────────────────────
 
-*Run before any other new development.*
+*Run before any other new development. Phase R is DONE — this prompt is for reference.*
 
 ```
 Read CLAUDE.md completely and answer the master context questions before writing code.
-PHASE R — utils.py refactor. No new features. Move existing functions to a shared module.
-Also apply the security fixes from §8.20 during this same session.
+PHASE R — utils.py refactor. No new features. Move existing functions to shared module.
+Apply security fixes from §8.20 in this same session.
 
 WHAT TO CREATE:
   scripts/__init__.py   ← empty file, makes scripts/ a Python package
-  scripts/utils.py      ← all shared infrastructure (see below)
+  scripts/utils.py      ← all shared infrastructure
 
 FUNCTIONS THAT MOVE TO utils.py:
 
-  1. calculate_period_start(today=None) -> date
-     Currently in: molina_report.py, molina_downloader.py, ambetter_bot.py,
-                   oscar_bot.py, cigna_bot.py, united_bot.py (6 copies)
+  1. get_r2_start_date() -> date                            ← REPLACES calculate_period_start
+     Reads fixed historical date from config/config.yaml → r2.start_date.
+     Currently in: all 5 bots as calculate_period_start (diverged copies).
+     See §6 and §8.23 in CLAUDE.md for full rationale.
 
   2. run_type() -> str
-     Currently in: oscar_bot.py (as _run_type), cigna_bot.py, united_bot.py
+     Currently in: oscar_bot.py, cigna_bot.py, united_bot.py
 
   3. setup_logging(carrier: str) -> logging.Logger
-     Currently in: molina_downloader.py, oscar_bot.py, cigna_bot.py, united_bot.py
-     New filename: run_YYYYMMDD_HHMMSS_{carrier}.log (add seconds to prevent collision)
+     Filename: run_YYYYMMDD_HHMMSS_{carrier}.log (seconds prevent collision)
 
   4. with_retry(func, operation_name, max_attempts=3, log=None)
      Currently in: molina_downloader.py only
 
   5. append_deactivated_xlsx(r2_records, carrier, log=None) -> None
-     Currently in: molina_downloader.py, ambetter_bot.py, oscar_bot.py,
-                   cigna_bot.py, united_bot.py (5 copies — already diverged)
-     Use the most complete version (null policy_number guard from Ambetter/Oscar).
+     Currently in: all 5 bots (diverged). Use most complete version.
+     Dedup key: (carrier, policy_number, coverage_end_date). Existing rows win.
 
-  6. write_r1_xlsx(r1_records, carrier, log=None) -> None  ← NEW FUNCTION
-     Does not exist yet in any bot — currently each bot has its own ad-hoc write logic.
-     Authoritative merge-on-write implementation (see §8.22 in CLAUDE.md for full code).
-     Load existing → remove rows for agents in current run → append → save.
-     Never overwrites entire file. Safe for --agent N reruns.
+  6. write_r1_xlsx(r1_records, carrier, log=None) -> None        ← NEW
+     Merge-on-write. Load → remove current agents → append → save. See §8.22.
 
-SECURITY FIXES TO APPLY IN THE SAME SESSION:
-  1. united_bot.py: remove print(f"     Password: {agent['pass']}")
-     Replace with: print(f"     Account: {agent['user']}")
-                   print(f"     (Use your password manager for the password)")
-  2. Verify .gitignore has: logs/, data/raw/, data/output/, data/state/
+  7. write_active_members_xlsx(r3_records, carrier, log=None) -> None  ← NEW STUB
+     Output: data/output/active_members_all.xlsx
+     Dedup key: (carrier, policy_number, run_date). Existing rows win.
+     In Phase R: implement fully — the function body is needed by Phase GUI+R3.
+     R3 schema: run_date, carrier, agent_name, member_first_name, member_last_name,
+       member_dob, state, policy_number, plan_name, coverage_start_date, policy_status
 
-UPDATE EACH BOT FILE:
-  - Delete all local definitions of the functions above
-  - Add to top of each bot:
-      from scripts.utils import (
-          calculate_period_start,
-          append_deactivated_xlsx,
-          write_r1_xlsx,
-          run_type,
-          setup_logging,
-          with_retry,
-      )
-  - Replace each bot's ad-hoc XLSX write logic with write_r1_xlsx(r1_records, carrier)
-  - Update run_X() signature to: def run_X(dry_run=False, agent_filter=None)
+SECURITY FIXES:
+  1. united_bot.py: remove password print, replace with username + password manager note
+  2. Verify .gitignore: logs/, data/raw/, data/output/, data/state/,
+     data/chrome_profiles/, config/agents.yaml, credentials/, .env
+
+UPDATE EACH BOT:
+  - Delete all local definitions of functions above
+  - Add imports from scripts.utils
+  - Replace ad-hoc XLSX write logic with write_r1_xlsx(r1_records, carrier)
+  - Update run_X() signature: def run_X(dry_run=False, agent_filter=None, mode='regular')
+    mode parameter: in Phase R, 'roster' is a no-op that logs "roster mode coming in Phase GUI+R3"
 
 UPDATE sheets_writer.py:
-  - sheets_writer.py now reads from XLSX files on disk instead of receiving in-memory
-    records. It must:
-    1. Read each carrier XLSX from data/output/{carrier}_all_agents.xlsx
-    2. Build R1 records from those files
-    3. Read deactivated_members.xlsx for R2 records
-    4. Push both to Google Sheets (same logic as before, different data source)
-  - Public API becomes: push_to_sheets(dry_run=False) — no parameters for records.
+  - Reads from data/output/*.xlsx on disk (not in-memory records)
+  - Public API: push_to_sheets(dry_run=False, mode='regular')
+    mode='roster' stub: logs "roster push coming in Phase GUI+R3" and returns
 
-RULES FOR THIS SESSION:
-  - Move functions exactly as they exist. Do not change business logic at the same time.
-  - If implementations differ across files, use the most complete version in utils.py.
-  - Do not touch molina_report.py domain logic — only its calculate_period_start import.
+RULES:
+  - Move functions exactly. Do not change business logic at the same time.
+  - Do not touch molina_report.py domain logic.
 
-VERIFICATION (run each after the session — all must pass with no errors):
+VERIFICATION (all must pass before committing):
   python scripts/molina_downloader.py --agent 0 --dry-run
   python scripts/ambetter_bot.py --agent 0 --dry-run
   python scripts/oscar_bot.py --agent 0 --dry-run
@@ -145,12 +152,14 @@ VERIFICATION (run each after the session — all must pass with no errors):
 
 DONE WHEN:
   ✓ scripts/__init__.py exists (empty)
-  ✓ scripts/utils.py contains all 6 functions with correct implementations
-  ✓ All 5 bot files import from utils.py — no local copies remain
+  ✓ scripts/utils.py has all 7 functions
+  ✓ All 5 bots import from utils.py — no local copies remain
   ✓ write_r1_xlsx() used in every bot for R1 XLSX output
-  ✓ sheets_writer.py reads from XLSX files — not from in-memory records
-  ✓ sheets_writer.py has push_to_sheets(dry_run=False) as its public API
-  ✓ All 6 verification commands pass without ImportError or NameError
+  ✓ write_active_members_xlsx() implemented in utils.py (full body, not stub)
+  ✓ All bots have run_X(dry_run, agent_filter, mode='regular') signature
+  ✓ sheets_writer.py reads from XLSX on disk
+  ✓ sheets_writer.py has push_to_sheets(dry_run, mode) signature
+  ✓ All 6 verification commands pass
   ✓ Password print removed from united_bot.py
   ✓ .gitignore verified
   ✓ Committed: "refactor: phase R — utils.py + security fixes"
@@ -158,206 +167,375 @@ DONE WHEN:
 
 ---
 
-## ── PHASE GUI — tkinter Launcher ────────────────────────────────────
+## ── PHASE GUI+R3 — Launcher + Active Roster ────────────────────────
 
 *Start only after Phase R is committed and all 6 verification commands pass.*
 
 ```
-Read CLAUDE.md completely and answer the master context questions before writing code.
-Phase R complete. Building the tkinter GUI launcher. This replaces Phase 8 entirely.
-The GUI is the run center — no Task Scheduler, no main.py orchestrator.
+Read CLAUDE.md completely and answer all 12 master context questions before writing code.
+Phase R complete. Building Phase GUI+R3 in a single session.
 
-Build: scripts/launcher.py
-Library: tkinter (built into Python — no install needed)
+This phase has two parts built together:
+  PART A — R3 bot logic: add mode='roster' behavior to all 5 bots
+  PART B — GUI launcher: two-section tkinter interface
+  PART C — sheets_writer roster push
 
-PIPELINE FLOW THE GUI IMPLEMENTS:
-  Step 1: Run bots individually → each writes to its carrier XLSX file
-  Step 2: Operator clicks [Push to Google Sheets] when ready → sheets_writer runs
-  These are always separate steps. Never auto-trigger the push after a bot run.
+════════════════════════════════════════════════════════════════════
+PART A — R3 BOT LOGIC
+Add mode='roster' to each bot. mode='regular' behavior is UNCHANGED.
+R3 is additive — never modifies R1 or R2.
+════════════════════════════════════════════════════════════════════
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-UI LAYOUT
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+R3 SCHEMA (defined in CLAUDE.md §5):
+  run_date, carrier, agent_name, member_first_name, member_last_name,
+  member_dob, state, policy_number, plan_name, coverage_start_date, policy_status
 
-┌─────────────────────────────────────────────────────────────┐
-│           Insurance Analytics — Run Center                  │
-│                                                             │
-│  [▶ Run All Carriers]        [☁ Push to Google Sheets]      │
-│                                                             │
-│  Carrier    Status        Last Run      Agents   Action     │
-│  ──────────────────────────────────────────────────────     │
-│  Molina     ✅ Today      Apr 21 09:04   15/15   [Run] [↩]  │
-│  Ambetter   ✅ Today      Apr 21 09:18   16/16   [Run] [↩]  │
-│  Oscar      ⚠ Yesterday  Apr 20 09:11   12/13   [Run] [↩]  │
-│  Cigna      ✅ Today      Apr 21 09:35   12/12   [Run] [↩]  │
-│  United     ⚠ 3 manual   Apr 21 09:52    9/12   [Run] [↩]  │
-│                                                             │
-│  ──────────────────────────────────────────────────────     │
-│  [📂 Open Output Folder]  [📊 Open Google Sheet]            │
-│  [📋 View Last Log]                                         │
-│                                                             │
-│  ┌─ Log Output ────────────────────────────────────────┐    │
-│  │ 09:04:12 | MOLINA | INFO | agent 1/15 Brandon K OK  │    │
-│  │ 09:04:55 | MOLINA | INFO | agent 2/15 Felipe V OK   │    │
-│  └─────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────┘
+── MOLINA ──────────────────────────────────────────────────────────
+No portal navigation changes. Same CSV used for R1+R2 also provides R3.
 
-[↩] = single-agent rerun button. Clicking it prompts: "Agent index (0-based):"
-     then runs: python scripts/{carrier}_bot.py --agent N
+mode='roster': after R1+R2, generate R3 records from the already-downloaded CSV:
+  Filter: Status in ["Active", "Pending Payment", "Pending Binder"]
+  Columns (from config/config.yaml carriers.molina.columns):
+    agent_name:           always from agents.yaml
+    member_first_name:    parse from name columns (Broker_First_Name pattern for members)
+    member_last_name:     parse from name columns
+    member_dob:           "dob" → format MM/DD/YYYY
+    state:                "State.1" or "State"
+    policy_number:        "Subscriber_ID"
+    plan_name:            "Product"
+    coverage_start_date:  "Effective_date"
+    policy_status:        "Status"
+  Call: write_active_members_xlsx(r3_records, 'Molina', log)
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-BUTTON BEHAVIORS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+── OSCAR ────────────────────────────────────────────────────────────
+No portal navigation changes. Same CSV used for R1+R2 also provides R3.
+
+mode='roster': after R1+R2, generate R3 records from the already-downloaded CSV:
+  Filter: Policy status in ["Active", "Grace period", "Delinquent"]
+  Columns (from config/config.yaml carriers.oscar.columns):
+    agent_name:           always from agents.yaml
+    member_first_name:    first word of "Member name"
+    member_last_name:     remainder of "Member name"
+    member_dob:           "Date of birth" → format MM/DD/YYYY
+    state:                "State"
+    policy_number:        "Member ID"
+    plan_name:            "Plan"
+    coverage_start_date:  "Coverage start date"
+    policy_status:        "Policy status"
+  Call: write_active_members_xlsx(r3_records, 'Oscar', log)
+
+── AMBETTER ────────────────────────────────────────────────────────
+mode='regular' (UNCHANGED):
+  requests bypass URL: filter=cancelled → R2 only
+
+mode='roster' (NEW):
+  requests bypass URL: https://broker.ambetterhealth.com/apex/BC_VFP02_PolicyList_CSV?filter=all&offset=0
+  Same session/cookie pattern as regular mode.
+  Pagination: identical structure to current (offset parameter).
+  IMPORTANT: Confirm actual page size on first request — filter=all may not return 334
+  rows per page. Add logging: log page size of first response before looping.
+  After full download, split in Python:
+
+  R2: Policy Status == "Terminated"
+      AND Policy Term Date >= get_r2_start_date()
+      → append_deactivated_xlsx(r2_records, 'Ambetter', log)
+
+  R3: Policy Status == "Active"
+      Columns (all from config/config.yaml carriers.ambetter.columns):
+        agent_name:           always from agents.yaml (NEVER from "Payable Agent" — §8.3)
+        member_first_name:    "Insured First Name"
+        member_last_name:     "Insured Last Name"
+        member_dob:           "Member Date Of Birth"
+        state:                "State"
+        policy_number:        "Policy Number"
+        plan_name:            "Plan Name"
+        coverage_start_date:  "Policy Effective Date"
+        policy_status:        "Policy Status"
+      → write_active_members_xlsx(r3_records, 'Ambetter', log)
+
+  Log after split: total rows downloaded, R2 count, R3 count, net new appended each.
+
+── UNITED ───────────────────────────────────────────────────────────
+mode='regular' (UNCHANGED):
+  Jarvis BOB downloaded with planStatus=I filter → R2 only
+
+mode='roster' (NEW):
+  Remove planStatus filter from Jarvis BOB download → download full book.
+  Header detection (scan rows 0–9 for "memberFirstName") unchanged.
+  After download, split in Python:
+
+  R2: planStatus == "I"
+      AND policyTermDate >= get_r2_start_date()
+      → append_deactivated_xlsx(r2_records, 'United', log)
+
+  R3: planStatus == "A"
+      Columns (from config/config.yaml carriers.united.columns):
+        agent_name:           always from agents.yaml
+        member_first_name:    "memberFirstName"
+        member_last_name:     "memberLastName"
+        member_dob:           "dateOfBirth"
+        state:                "memberState"
+        policy_number:        null (§8.20.5 — unconfirmed)
+        plan_name:            "product"
+        coverage_start_date:  null (not in Jarvis export)
+        policy_status:        "Active" (derived from planStatus == "A")
+      → write_active_members_xlsx(r3_records, 'United', log)
+
+  skip_bot agents (Mike, Tony, Yusbel): in roster mode, log manual reminder only.
+  Do not attempt automation — same rule as regular mode.
+
+── CIGNA ────────────────────────────────────────────────────────────
+mode='regular' (UNCHANGED):
+  Bot pauses → operator selects "Terminated" filter → presses ENTER → R2 only.
+
+mode='roster' (NEW):
+  Update pause message:
+    Regular: "Apply TERMINATED filter in portal, then press ENTER"
+    Roster:  "Select ALL POLICIES (no status filter) in portal, then press ENTER"
+
+  After export, split in Python:
+  R2: "Policy Status" == "Terminated"
+      AND "Termination Date" >= get_r2_start_date()
+      → append_deactivated_xlsx(r2_records, 'Cigna', log)
+
+  R3: "Policy Status" == "Active"
+      Columns (from config/config.yaml carriers.cigna.columns):
+        agent_name:           always from agents.yaml
+        member_first_name:    "Primary First Name"
+        member_last_name:     "Primary Last Name"
+        member_dob:           null (PERMANENT — §8.12)
+        state:                "State"
+        policy_number:        "Subscriber ID (Detail Case #)"
+        plan_name:            "Plan Name"
+        coverage_start_date:  "Effective Date"
+        policy_status:        "Policy Status"
+      → write_active_members_xlsx(r3_records, 'Cigna', log)
+
+════════════════════════════════════════════════════════════════════
+PART B — UPDATE sheets_writer.py
+════════════════════════════════════════════════════════════════════
+
+push_to_sheets(dry_run=False, mode='regular'):
+
+  mode='regular' (EXISTING — unchanged behavior):
+    Reads carrier XLSX → builds R1 pivot → writes Summary tab (overwrite)
+    Reads deactivated_members.xlsx → writes Deactivated tab (append + dedup)
+    Reads carrier XLSX active counts → writes Active Members tab (append)
+
+  mode='roster' (NEW):
+    Reads data/output/active_members_all.xlsx
+    Writes Google Sheets tab: "Active Roster – {Month} {Year}"
+    Tab is OVERWRITTEN on every roster push — it is a point-in-time snapshot.
+    If tab does not exist, create it with headers first (_ensure_tab_headers pattern).
+    Log: total rows written, carrier breakdown, sheet tab name.
+
+  CLI: python scripts/sheets_writer.py --mode regular
+       python scripts/sheets_writer.py --mode roster
+       python scripts/sheets_writer.py --dry-run --mode regular
+       python scripts/sheets_writer.py --dry-run --mode roster
+
+════════════════════════════════════════════════════════════════════
+PART C — GUI LAUNCHER (scripts/launcher.py)
+Build from scratch. tkinter only. No external GUI libraries.
+════════════════════════════════════════════════════════════════════
+
+UI LAYOUT:
+┌──────────────────────────────────────────────────────────────────┐
+│  Limitless Insurance Group — Run Center                          │
+│                                                                  │
+│  ── REGULAR RUN (R1 + R2) ── Twice weekly / daily ────────────── │
+│                                                                  │
+│  [▶ Run All Carriers]             [☁ Push to Google Sheets]      │
+│                                                                  │
+│  Carrier   Status       Last Run      Agents    Action           │
+│  ────────────────────────────────────────────────────────────    │
+│  Molina    ✅ Today     Apr 24 09:04  15/15     [Run]  [↩]       │
+│  Ambetter  ✅ Today     Apr 24 09:18  16/16     [Run]  [↩]       │
+│  Oscar     ⚠ Yesterday Apr 23 09:11  12/13     [Run]  [↩]       │
+│  Cigna     ✅ Today     Apr 24 09:35  12/12     [Run]  [↩]       │
+│  United    ⚠ Manual    Apr 24 09:52   9/12     [Run]  [↩]       │
+│                                                                  │
+│  ── MONTHLY ROSTER (R3) ── Once a month ─────────────────────── │
+│                                                                  │
+│  [📋 Run Roster — All Carriers]    [📤 Push Roster to Sheets]    │
+│  Last roster run: never                                          │
+│                                                                  │
+│  ── UTILITIES ────────────────────────────────────────────────── │
+│  [📂 Open Output Folder]  [📊 Open Google Sheet]  [📋 Last Log]  │
+│                                                                  │
+│  ┌─ Log Output ──────────────────────────────────────────────┐   │
+│  │ 09:04:12 | MOLINA | INFO | agent 1/15 Brandon K OK        │   │
+│  └────────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────┘
+
+BUTTON BEHAVIORS:
 
 [Run] per carrier:
-  - subprocess.Popen: python scripts/{carrier}_bot.py
-  - Streams stdout to log panel in real time (threading)
-  - Button disables while running, re-enables on completion
-  - Status badge and last-run timestamp update after completion
+  - sys.executable scripts/{carrier}_bot.py --mode regular
+  - Streams stdout to log panel (threading). Disables while running.
+  - Status badge + last-run timestamp update on completion.
 
-[↩] (single-agent rerun) per carrier:
-  - Prompts for agent index via a small dialog
-  - subprocess.Popen: python scripts/{carrier}_bot.py --agent N
-  - Same streaming output as [Run]
-  - Safe because write_r1_xlsx() merges — other agents unaffected
+[↩] (single-agent rerun):
+  - Prompts for agent index via dialog
+  - sys.executable scripts/{carrier}_bot.py --agent N --mode regular
+  - Safe because write_r1_xlsx() merges — other agents unaffected.
 
-[Run All Carriers]:
-  - Runs all 5 bots sequentially: Molina → Ambetter → Cigna → United → Oscar
-  - Does NOT auto-push to Sheets after completion
-  - All buttons disable during run
+[▶ Run All Carriers]:
+  - All 5 bots sequentially: Molina → Ambetter → Cigna → United → Oscar
+  - mode=regular. Does NOT auto-push to Sheets.
+  - All buttons disable during run.
 
 [☁ Push to Google Sheets]:
-  - subprocess.Popen: python scripts/sheets_writer.py
-  - Streams output to log panel
-  - Separate, intentional action — never triggered automatically
-  - Shows confirmation dialog before running: "Push all carrier data to Sheets?"
+  - Confirmation: "Push R1 + R2 data to Sheets?"
+  - sys.executable scripts/sheets_writer.py --mode regular
+  - Streams output to log panel.
+
+[📋 Run Roster — All Carriers]:
+  - Confirmation: "Run MONTHLY ROSTER for all carriers?
+    This downloads full Book of Business data and takes longer than a regular run."
+  - All 5 bots sequentially with --mode roster
+  - Updates "Last roster run: {date}" label on success
+  - All buttons disable during run.
+
+[📤 Push Roster to Sheets]:
+  - Confirmation: "Push active member roster to Sheets?
+    This will OVERWRITE the Active Roster tab for {current_month}."
+  - sys.executable scripts/sheets_writer.py --mode roster
+  - Streams output to log panel.
 
 [📂 Open Output Folder]: os.startfile(str(ROOT / "data" / "output"))
-[📊 Open Google Sheet]: open current month sheet URL in browser (from .env)
-[📋 View Last Log]: open most recent file in logs/ in default text editor
+[📊 Open Google Sheet]: open current month Sheet URL from .env in browser
+[📋 Last Log]: open most recent file in logs/ in default text editor
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STATUS BADGE LOGIC
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STATUS BADGE LOGIC:
+  ✅ = XLSX modified today AND row count >= expected agent count
+  ⚠  = XLSX modified before today, OR agent count below expected
+  ❌ = XLSX exists but last run logged failures (status/last_run.json)
+  —  = XLSX does not exist
 
-Read from carrier XLSX file in data/output/:
-  ✅  = XLSX modified today AND row count >= expected agent count
-  ⚠   = XLSX modified before today, OR agent count below expected,
-        OR carrier is United (always show "3 manual agents" note)
-  ❌  = XLSX exists but last run logged failures (check status/last_run.json)
-  —   = XLSX does not exist (never run)
+Expected counts: Molina:15 Ambetter:16 Oscar:13 Cigna:12 United:12 (3 always manual)
+United row always shows: "(Mike, Tony, Yusbel require manual entry)"
+"Last roster run" label reads from status/last_roster_run.txt. Shows "never" if missing.
 
-Show: last modified timestamp, actual agent row count in file.
-United: always append "(Mike, Tony, Yusbel require manual entry)"
+TECHNICAL REQUIREMENTS:
+  - tkinter only — no external GUI libraries
+  - subprocess.Popen for all scripts — non-blocking, real-time output
+  - Threading for stdout capture — never block UI thread
+  - sys.executable for all subprocess calls — ensures venv Python
+  - python-dotenv to read .env for Sheet URL
+  - All paths relative to project root (resolve from launcher.py location)
+  - Handle missing status files gracefully (first run has no status/last_run.json)
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-TECHNICAL REQUIREMENTS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+RULES FOR THIS SESSION:
+  - mode='regular' behavior in all bots MUST be identical to Phase R output.
+    Run --agent 0 --dry-run --mode regular and confirm no behavioral change.
+  - R3 is additive. R1 and R2 are never modified.
+  - agent_name always from agents.yaml. Never from portal CSV columns.
+  - write_active_members_xlsx() imported from scripts.utils — never redefined in bots.
+  - Column names from config/config.yaml — never hardcoded in bot files.
+  - No-spiral rule: 3 failed attempts → stop, propose 2 alternatives.
 
-- tkinter only — no external GUI libraries
-- subprocess.Popen for all scripts — non-blocking, real-time output
-- Threading for stdout capture — never block the UI thread
-- Read .env with python-dotenv for sheet ID
-- All paths relative to project root (resolve from launcher.py location)
-- Use sys.executable to ensure the venv Python is used, not system Python
-
-Script commands:
-  Molina:         python scripts/molina_downloader.py
-  Ambetter:       python scripts/ambetter_bot.py
-  Oscar:          python scripts/oscar_bot.py
-  Cigna:          python scripts/cigna_bot.py
-  United:         python scripts/united_bot.py
-  Push to Sheets: python scripts/sheets_writer.py
-  Single-agent:   python scripts/{carrier}_bot.py --agent N
+VERIFICATION (all must pass before committing):
+  python scripts/molina_downloader.py --agent 0 --dry-run
+  python scripts/molina_downloader.py --agent 0 --dry-run --mode roster
+  python scripts/ambetter_bot.py --agent 0 --dry-run --mode regular
+  python scripts/ambetter_bot.py --agent 0 --dry-run --mode roster
+  python scripts/oscar_bot.py --agent 0 --dry-run --mode roster
+  python scripts/cigna_bot.py --agent 0 --dry-run
+  python scripts/united_bot.py --agent 0 --dry-run --mode roster
+  python scripts/sheets_writer.py --dry-run --mode regular
+  python scripts/sheets_writer.py --dry-run --mode roster
+  python scripts/launcher.py   ← window opens, two sections visible, no errors
 
 DONE WHEN:
-  ✓ Window opens, all 5 carriers show correct status badges and agent counts
-  ✓ [Run] launches bot, streams output, updates status on completion
-  ✓ [↩] prompts for agent index, runs single-agent rerun, merges XLSX correctly
-  ✓ [Run All] runs all 5 in sequence, does NOT auto-push
-  ✓ [Push to Google Sheets] shows confirmation dialog, runs sheets_writer, streams output
-  ✓ [Open Output Folder], [Open Google Sheet], [View Last Log] all work
-  ✓ All buttons disable while any subprocess is running
+  ✓ All 5 bots: mode='regular' behavior unchanged, mode='roster' generates R3 records
+  ✓ Ambetter roster: filter=all URL, R2+R3 split, pagination confirmed/logged
+  ✓ United roster: full BOB download, planStatus A vs I split
+  ✓ Cigna roster: pause message updated, Active vs Terminated split
+  ✓ Molina + Oscar: R3 generated from existing download, zero extra portal traffic
+  ✓ data/output/active_members_all.xlsx written on roster run
+  ✓ sheets_writer --mode roster pushes "Active Roster – {Month} {Year}" (overwrite)
+  ✓ launcher.py opens with two sections (Regular Run + Monthly Roster)
+  ✓ All Regular Run buttons work with --mode regular
+  ✓ [Run Roster] and [Push Roster to Sheets] work correctly
+  ✓ Confirmation dialogs appear for all push/roster actions
   ✓ United row shows manual agent note
-  ✓ Committed: "feat: launcher — GUI run center (replaces Phase 8)"
+  ✓ "Last roster run" label updates after successful roster run
+  ✓ All 10 verification commands pass
+  ✓ Committed: "feat: phase GUI+R3 — launcher + active roster"
 ```
 
 ---
 
-## ── PHASE 7 — Looker Studio Dashboard ────────────────────────────────
+## ── PHASE 7 — Looker Studio Dashboard ─────────────────────────────
+
+*Start only after GUI+R3 is committed and the pipeline has pushed to Sheets at least
+twice (regular) and at least once (roster).*
 
 ```
 Read CLAUDE.md completely and answer the master context questions before writing code.
-GUI complete. Pipeline has been pushed to Google Sheets at least twice.
+GUI+R3 complete. Pipeline pushed to Sheets. Building Looker Studio dashboard.
 
-PREREQUISITES (verify before starting this session):
-  - All 5 carriers have at least one successful Sheets push in the current month
-  - "Active Members" tab has data from at least 2 different run_date values
-  - "Deactivated This Period" tab has at least a few R2 rows
-  - Spot-check: run_date is YYYY-MM-DD, active_members is a number, carrier
-    spelling is exactly: Ambetter, Cigna, Molina, Oscar, United
+PREREQUISITES (verify before starting):
+  - Active Members tab: at least 2 different run_date values
+  - Deactivated This Period tab: at least 5 rows
+  - Active Roster tab: at least one roster push complete
+  - Spot-check: run_date is YYYY-MM-DD, active_members is a number,
+    carrier spelling is exactly: Ambetter, Cigna, Molina, Oscar, United HC
+  - Active Roster tab: member_dob blank (not "null" text) for Cigna rows
 
-KNOWN NULL FIELDS (Looker Studio must handle gracefully — no error on null):
-  - member_dob: null for all Cigna records (permanent — see §8.12)
-  - policy_number: United uses name composite "First_Last" until real ID confirmed
+KNOWN NULL FIELDS (must display as blank — never as error):
+  - member_dob: null for all Cigna R2 and R3 records (permanent — §8.12)
+  - policy_number: United uses null until subscriber ID confirmed (§8.20.5)
 
 DATA SOURCES:
-  Monthly Sheets: connect both current month and previous month for MoM comparison
-  Tab "Active Members":  run_date | run_type | carrier | agent_name | active_members | status
-  Tab "Deactivated This Period":
-                         run_date | carrier | agent_name | member_name |
-                         member_dob | state | coverage_end_date | policy_number
+  Tab "Summary":               agents × carriers pivot, latest run_date
+  Tab "Active Members":        run_date | run_type | carrier | agent_name | active_members | status
+  Tab "Deactivated This Period": run_date | carrier | agent_name | member_name |
+                                member_dob | state | coverage_end_date | policy_number
+  Tab "Active Roster – {Month}": run_date | carrier | agent_name | member_first_name |
+                                member_last_name | member_dob | state | policy_number |
+                                plan_name | coverage_start_date | policy_status
 
-6 PAGES:
+5 PAGES:
 
 Page 1 — Current Snapshot
-  Contingency table: agents × carriers, most recent run_date only
-  Grand total row + column. Missing carrier = blank, not zero.
-  Filter: run_date defaulting to max.
+  Contingency table: agents × carriers, most recent run_date.
+  Grand total row + column. Missing = blank, not zero.
 
-Page 2 — Trend Over Time
-  Line chart: x=run_date, y=SUM(active_members), one line per carrier, trailing 90 days.
+Page 2 — Portfolio Trend
+  Line chart: x=run_date, y=SUM(active_members), one line per carrier, 90 days.
 
-Page 3 — Carrier Summary
-  Bar chart: total active per carrier, current month.
-  Scorecard: total active across all carriers.
+Page 3 — Agent Rankings
+  Table: agents sorted by total members. Carrier filter control.
 
-Page 4 — Agent Rankings
-  Table: agents sorted descending by total members across all carriers.
-  Carrier filter control.
+Page 4 — Churn Analysis
+  Table from Deactivated tab: member_name | agent | carrier | coverage_end_date | state
+  Date range filter. Scorecard: total deactivated in period.
+  Nulls as blank.
 
-Page 5 — Month-over-Month
-  Table: agent | this month | last month | delta | % change
-  Calculated fields for delta and %. Red/green conditional formatting.
-  Requires data blending across monthly sheets.
-
-Page 6 — Churn Analysis
-  Table: member_name | agent | carrier | coverage_end_date | state | member_dob | policy_number
-  Date range filter on coverage_end_date.
-  Scorecard: total deactivated in selected period.
-  Nulls display as blank (not "null" text).
+Page 5 — Active Roster
+  Table from Active Roster tab: full member-level detail.
+  Filters: carrier, agent_name, state, policy_status.
+  Scorecard: total active members in filtered view.
+  member_dob blank for Cigna rows.
 
 FORMAT: Step-by-step UI walkthrough — not code.
-
-Include:
-  - How to connect Google Sheets as a data source
-  - Data blending setup for Page 5 (cross-sheet MoM)
-  - Calculated field formulas for delta and %
-  - Default date filter to current month
-  - Sharing as view-only for manager
-  - Known Looker Studio limitations for this use case
+Include: data source connection, tab blending for Page 2, sharing view-only for manager.
 
 DONE WHEN:
-  ✓ All 6 pages display with real data
+  ✓ All 5 pages display with real data
   ✓ Page 1 pivot matches Google Sheets Summary tab
-  ✓ Page 6 shows null member_dob as blank for Cigna rows, not as error
-  ✓ Date filters work on all pages
+  ✓ Page 5 shows member-level detail with carrier/agent/state filters
+  ✓ Cigna member_dob shows blank (not error) in Pages 4 and 5
   ✓ Shared view-only link confirmed working for manager
 ```
 
 ---
 
 ## ── PHASE 9 — Playwright Migration ─────────────────────────────────
+
+*Start only after pipeline has run successfully at least 4 consecutive times.*
 
 ```
 Read CLAUDE.md completely. Phase 9. Pipeline in production with 4+ stable runs.
@@ -369,14 +547,14 @@ can be removed. If it crashes, keep the bypass, replace only the Selenium layer.
 Rules:
   - Replace all WebDriverWait / _clickable() / _wait() with auto-wait
   - Never use page.wait_for_timeout()
-  - Keep all business logic identical
+  - Keep all business logic identical (both mode='regular' and mode='roster')
   - Import from scripts.utils — do not redefine locally
-  - Run --agent 0 --dry-run and confirm output identical to Selenium version
+  - Run --agent 0 --dry-run --mode regular AND --mode roster, confirm output identical
   - Do NOT pass downloads_path to browser.new_context()
 
 DONE WHEN:
-  ✓ ambetter_bot.py runs with Playwright, identical output to Selenium version
-  ✓ molina_downloader.py runs with Playwright, identical output to Selenium version
+  ✓ ambetter_bot.py runs with Playwright, both modes identical to Selenium version
+  ✓ molina_downloader.py runs with Playwright, both modes identical to Selenium version
   ✓ Selenium + webdriver-manager removed from requirements.txt
   ✓ Committed: "phase-9: full migration to playwright complete"
 ```
@@ -391,7 +569,7 @@ DONE WHEN:
 DEBUG — Element Not Found
 Read CLAUDE.md first.
 
-Phase: [N] | Script: [filename.py] | Carrier: [name] | Library: [Selenium / Playwright]
+Phase: [N] | Script: [filename.py] | Carrier: [name] | Mode: [regular/roster] | Library: [Selenium/Playwright]
 
 Error: [paste full traceback]
 Failing code (10–15 lines): [paste]
@@ -399,8 +577,8 @@ Already tried: [describe]
 
 1. Diagnose root cause — not just "element not found"
 2. Give alternative selector strategy
-3. Show how to print current DOM at the failure point
-4. If Playwright: confirm auto-wait is used, not wait_for_timeout
+3. Show how to print current DOM at failure point
+4. If Playwright: confirm auto-wait, not wait_for_timeout
 5. If selector fix: update config/config.yaml, not the Python file
 ```
 
@@ -429,21 +607,20 @@ Do NOT suggest attempt 4.
 
 ```
 DEBUG — R2 Count Discrepancy
-Read CLAUDE.md §6 and §8.4 first.
+Read CLAUDE.md §6 and §8 first.
 
 Carrier: [name] | Expected: ~[N] | Script produced: [N]
-Today: [weekday, date] | calculate_period_start() returned: [date]
+Today: [date] | get_r2_start_date() returned: [date]
 Sample R2 records (first 5): [paste]
 Log lines showing row counts before/after date filter: [paste]
 
 Investigate in order:
-1. Is calculate_period_start() imported from utils.py or defined locally?
-   A local override would be a bug — there should be exactly one definition.
+1. Is get_r2_start_date() imported from utils.py or defined locally?
 2. Is the date filter using the correct column name from CLAUDE.md §9?
-3. Molina/Oscar? Terminations stamped at month-end — confirm period_start = last day.
-4. Ambetter/Cigna? Real dates — check actual column values vs filter date.
-5. Any records filtered by dedup before expected? Check existing deactivated_members.xlsx.
-6. Pagination issue? (Ambetter only — §8.16)
+3. Molina/Oscar? End-of-month stamping — confirm filter date is correct.
+4. Ambetter/Cigna/United? Real dates — check column values vs filter.
+5. Dedup dropping expected records? Check existing deactivated_members.xlsx.
+6. Ambetter: pagination issue? (§8.16) Log page sizes each iteration.
 ```
 
 ---
@@ -457,10 +634,10 @@ Read CLAUDE.md §11 first.
 Error: [paste traceback]
 
 Check:
-1. Does bot expose sync wrapper: def run_X(dry_run, agent_filter): return asyncio.run(...)?
+1. Does bot expose sync wrapper: def run_X(dry_run, agent_filter, mode): return asyncio.run(...)?
 2. Is async_playwright used as: async with async_playwright() as p?
 3. Is asyncio.run() called inside an already-running event loop?
-4. Is downloads_path passed to browser.new_context()? Remove it — not valid.
+4. Is downloads_path passed to browser.new_context()? Remove it.
 ```
 
 ---
@@ -469,17 +646,17 @@ Check:
 
 ```
 DEBUG — XLSX Output File Error
-Read CLAUDE.md §8.22 first.
+Read CLAUDE.md §8.22 and §15 first.
 
-Script: [filename.py]
-File: [{carrier}_all_agents / deactivated_members]
+Script: [filename.py] | Mode: [regular/roster]
+File: [{carrier}_all_agents / deactivated_members / active_members_all]
 Error: [paste traceback]
 
-Rules to enforce:
+Rules:
 - XLSX write failure is never fatal — log as WARNING and continue
-- write_r1_xlsx() must be called from scripts.utils, not defined locally
-- It merges — never resets — load → remove current agents → append → save
-- deactivated_members.xlsx is append-only — existing_df loaded before concat
+- write_r1_xlsx() and write_active_members_xlsx() must come from scripts.utils
+- write_active_members_xlsx() only called in mode='roster'
+- deactivated_members.xlsx and active_members_all.xlsx are append-only
 - If file is open in Excel: close it and re-run
 ```
 
@@ -488,20 +665,20 @@ Rules to enforce:
 ### DEBUG-6 — ImportError After Refactor
 
 ```
-DEBUG — ImportError or NameError after utils.py refactor
+DEBUG — ImportError or NameError
 Read CLAUDE.md §15 first.
 
-Error: [paste full ImportError or NameError]
+Error: [paste full error]
 Script: [filename.py]
 
 Check in order:
 1. Does scripts/__init__.py exist? (empty file — required)
-2. Is import correct at top of bot file?
-   from scripts.utils import calculate_period_start, append_deactivated_xlsx,
-       write_r1_xlsx, run_type, setup_logging, with_retry
-3. Is there still a local definition in the bot file that shadows the import?
-   grep "def calculate_period_start\|def _append_deactivated\|def write_r1" in bot file
-4. Was script run from project root? (cd to project root before python scripts/...)
+2. Import correct?
+   from scripts.utils import get_r2_start_date, append_deactivated_xlsx,
+       write_r1_xlsx, write_active_members_xlsx, run_type, setup_logging, with_retry
+3. Local definition shadowing the import?
+   grep "def get_r2_start_date\|def append_deactivated\|def write_r1\|def write_active" in bot file
+4. Run from project root?
 ```
 
 ---
@@ -514,17 +691,14 @@ Read CLAUDE.md §6 first.
 
 Symptom: same member appears twice in deactivated_members.xlsx.
 
-Root cause: period_start reaches back to last day of previous month.
-Without dedup, consecutive runs re-capture the same terminated members.
-
-Confirm append_deactivated_xlsx() is called from scripts.utils — not a local copy.
-The authoritative implementation must include:
+Confirm append_deactivated_xlsx() is from scripts.utils — not a local copy.
+Must include:
   combined = combined.drop_duplicates(
       subset=["carrier", "policy_number", "coverage_end_date"],
-      keep="first"  # existing rows win
+      keep="first"
   )
 
-Apply same fix to Google Sheets append in sheets_writer.py.
+Apply same dedup fix in sheets_writer.py Deactivated tab append.
 ```
 
 ---
@@ -535,20 +709,36 @@ Apply same fix to Google Sheets append in sheets_writer.py.
 DEBUG — Single-agent rerun overwrites other agents' data
 Read CLAUDE.md §8.22 and §15 first.
 
-Symptom: running --agent N causes other agents to disappear from the carrier XLSX.
-
-Root cause: bot is not using write_r1_xlsx() from utils.py, or the local write
-logic is still overwriting the entire file instead of merging.
+Symptom: running --agent N causes other agents to disappear.
 
 Fix:
-1. Confirm write_r1_xlsx() is imported from scripts.utils in this bot file.
-2. Confirm every R1 write in the bot calls write_r1_xlsx(r1_records, carrier_name).
-3. Confirm there is no other pd.ExcelWriter call in the bot that writes to the
-   carrier XLSX file without going through write_r1_xlsx().
+1. Confirm write_r1_xlsx() imported from scripts.utils in this bot.
+2. Confirm every R1 write calls write_r1_xlsx(r1_records, carrier_name).
+3. Confirm no other pd.ExcelWriter in the bot writes carrier XLSX directly.
 
-write_r1_xlsx() must follow this pattern exactly:
-  load existing → remove rows for agents in current run → append new → save
-  Never pd.ExcelWriter without first loading and merging.
+write_r1_xlsx() pattern: load existing → remove current agents → append → save.
+```
+
+---
+
+### DEBUG-9 — R3 Wrong Active Count or Missing Records
+
+```
+DEBUG — R3 Active Roster Issue
+Read CLAUDE.md §5, §6 (R3 section), §9 first.
+
+Carrier: [name] | Mode: roster | Expected: ~[N] active | Script produced: [N]
+Sample R3 records (first 5): [paste]
+
+Investigate in order:
+1. Is mode='roster' being passed correctly? Log mode value at bot entry.
+2. Is write_active_members_xlsx() being called? Check log output.
+3. Is write_active_members_xlsx() imported from scripts.utils — not redefined?
+4. Is the active status filter correct for this carrier? (See CLAUDE.md §6 R3 table)
+5. Ambetter only: was filter=all used (not filter=cancelled)? Log the URL.
+6. United only: was planStatus filter removed? Check BOB download size vs regular run.
+7. Cigna only: did operator select "All Policies" (not Terminated) at pause?
+8. Dedup dropping expected records? Check existing active_members_all.xlsx.
 ```
 
 ---
@@ -562,8 +752,9 @@ Read CLAUDE.md first.
 Carrier: [name] | New agent: name=[name], user=[email], pass=[password]
 
 1. Add entry to config/agents.yaml under [carrier]: section
-2. Run: python scripts/[carrier]_bot.py --agent [new_index] --dry-run
+2. python scripts/[carrier]_bot.py --agent [new_index] --dry-run --mode regular
 3. Confirm R1 record shows correct agent_name from agents.yaml
+4. If carrier supports R3: python scripts/[carrier]_bot.py --agent [new_index] --dry-run --mode roster
 ```
 
 ---
@@ -572,7 +763,7 @@ Carrier: [name] | New agent: name=[name], user=[email], pass=[password]
 
 ```
 Read CLAUDE.md first.
-Carrier: [name] | Broken selector: [value] | Error: [paste]
+Carrier: [name] | Mode: [regular/roster] | Broken selector: [value] | Error: [paste]
 
 1. Open portal manually in Chrome → DevTools → find stable selector
 2. Update config/config.yaml — NOT the Python file
@@ -589,19 +780,38 @@ Oscar: button classes are hashed — use probe loop, never hardcode. See §8.10.
 ```
 Read CLAUDE.md §13 first.
 1. Drive folder → New → Google Sheets → rename "[Month] [Year]"
-2. Rename default tab to "Summary", add "Deactivated This Period", "Active Members"
-3. Share with service account (Editor)
-4. Copy sheet ID → add to .env as SHEET_ID_[MONTH]_[YEAR]=<id>
-5. Run: python scripts/sheets_writer.py --dry-run
-   Confirm correct sheet ID resolves and write targets look right.
+2. Rename default tab to "Summary"
+3. Add tabs: "Deactivated This Period", "Active Members"
+   (Active Roster tab is created automatically by sheets_writer --mode roster)
+4. Share with service account (Editor)
+5. Copy sheet ID → add to .env as SHEET_ID_[MONTH]_[YEAR]=<id>
+6. python scripts/sheets_writer.py --dry-run --mode regular
+7. python scripts/sheets_writer.py --dry-run --mode roster
 ```
 
 ---
 
-*Last updated: April 20, 2026*
-*Key changes: Master context expanded to 10 questions — adds two-step flow, write_r1_xlsx,
-sheets_writer reads from XLSX, Phase 8 retirement. Phase R prompt updated to include
-write_r1_xlsx (new function) and sheets_writer refactor. Phase GUI prompt updated with
-[Push to Google Sheets] button, [↩] single-agent rerun button, and two-step flow rules.
-Phase 8 prompt retired. DEBUG-8 added for single-agent rerun resetting XLSX.
-Phase order throughout: R → GUI → 7 → 9.*
+### MAINT-4 — Roll Forward R2 Start Date
+
+```
+Read CLAUDE.md §6 first.
+
+When to roll forward: confident all carriers have published cancellations
+for the period being retired (~4–6 weeks of lag window).
+
+Steps:
+1. Edit config/config.yaml → r2.start_date: "YYYY-MM-DD"
+2. No code changes required.
+3. python scripts/sheets_writer.py --dry-run --mode regular
+   Confirm R2 row count looks reasonable (not a huge drop or flood).
+4. Commit: "config: roll r2.start_date forward to YYYY-MM-DD"
+5. Document in CLAUDE.md §6 as current value.
+```
+
+---
+
+*Last updated: April 27, 2026*
+*Master context updated to 13 questions — adds §8.26 null carrier value handling (deactivated
+account vs data gap). Architecture rules updated with null handling guideline.
+Phase GUI+R3 marked DONE. Phase 7 (Looker Studio) is now NEXT.
+Phase order: R ✅ → GUI+R3 ✅ → 7 ⏳ → 9 🔮*
