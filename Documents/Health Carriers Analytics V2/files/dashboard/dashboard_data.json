@@ -1,10 +1,10 @@
 {
   "meta": {
-    "generated": "2026-05-04",
+    "generated": "2026-05-08",
     "first_date": "03/02",
-    "latest_date": "05/04",
-    "total_dates": 18,
-    "total_agents": 21,
+    "latest_date": "05/08",
+    "total_dates": 19,
+    "total_agents": 26,
     "carriers": [
       "Ambetter",
       "Cigna",
@@ -31,7 +31,8 @@
     "04/24",
     "04/27",
     "04/29",
-    "05/04"
+    "05/04",
+    "05/08"
   ],
   "run_types": {
     "03/02": "Monday",
@@ -51,17 +52,21 @@
     "04/24": "Friday",
     "04/27": "Monday",
     "04/29": "Manual",
-    "05/04": "Monday"
+    "05/04": "Monday",
+    "05/08": "Friday"
   },
   "agents": [
     "Aaron Duarte",
     "Anthony Montenegro",
     "Brandon Kaplan",
+    "Dalton Myers",
     "Danielle Attias",
+    "Dominick Roberti",
     "Felipe Ramirez",
     "Jonathan Diaz",
     "Jose Ariza",
     "Jose Lares",
+    "Juan Dedios Gallegos Jr",
     "Juan Gallegos",
     "Justin Santa",
     "Kerry St Germain",
@@ -73,7 +78,9 @@
     "Michael Ortiz",
     "Nicholas Cuevas",
     "Osmayra Vega",
+    "Owen Glass",
     "Ruddy Arteaga",
+    "Ruddy Arteaga Bascope",
     "Yusbell Ortega"
   ],
   "carriers": [
@@ -2049,7 +2056,8 @@
       },
       "Danielle Attias": {
         "Ambetter": 66,
-        "Oscar": 90
+        "Oscar": 90,
+        "United HC": 40
       },
       "Jose Lares": {
         "Ambetter": 58,
@@ -2058,7 +2066,144 @@
       },
       "Aaron Duarte": {
         "Ambetter": 42,
-        "Oscar": 148
+        "Oscar": 148,
+        "United HC": 11
+      }
+    },
+    "05/08": {
+      "Luis Sosa": {
+        "Ambetter": 729,
+        "Cigna": 49,
+        "Molina": 113,
+        "United HC": 257
+      },
+      "Michael Lavernia": {
+        "Ambetter": 724,
+        "Cigna": 73,
+        "Molina": 63,
+        "Oscar": 413,
+        "United HC": 224
+      },
+      "Osmayra Vega": {
+        "Ambetter": 701,
+        "Molina": 71,
+        "Oscar": 486,
+        "United HC": 244
+      },
+      "Yusbell Ortega": {
+        "Ambetter": 508,
+        "Cigna": 43,
+        "Oscar": 199,
+        "United HC": 198
+      },
+      "Jose Ariza": {
+        "Ambetter": 491,
+        "Molina": 77,
+        "Cigna": 64,
+        "United HC": 64
+      },
+      "Justin Santa": {
+        "Ambetter": 440,
+        "Cigna": 29,
+        "Molina": 13,
+        "Oscar": 457,
+        "United HC": 138
+      },
+      "Juan Gallegos": {
+        "Ambetter": 434,
+        "Cigna": 18,
+        "United HC": 139
+      },
+      "Felipe Ramirez": {
+        "Ambetter": 397,
+        "Cigna": 44,
+        "Molina": 51,
+        "Oscar": 156,
+        "United HC": 202
+      },
+      "Leysi Espinel": {
+        "Ambetter": 361,
+        "Cigna": 26,
+        "Molina": 113
+      },
+      "Michael Ortiz": {
+        "Ambetter": 255
+      },
+      "Nicholas Cuevas": {
+        "Ambetter": 203,
+        "Oscar": 139
+      },
+      "Anthony Montenegro": {
+        "Ambetter": 184,
+        "Cigna": 28,
+        "Molina": 31,
+        "Oscar": 101,
+        "United HC": 55
+      },
+      "Kirsten Cuevas": {
+        "Ambetter": 183,
+        "Oscar": 123
+      },
+      "Jonathan Diaz": {
+        "Ambetter": 147,
+        "Cigna": 50,
+        "Molina": 25,
+        "Oscar": 49,
+        "United HC": 73
+      },
+      "Kerry St Germain": {
+        "Ambetter": 146,
+        "Molina": 52,
+        "Oscar": 72
+      },
+      "Ruddy Arteaga": {
+        "Ambetter": 138,
+        "Cigna": 32,
+        "Oscar": 38,
+        "United HC": 56
+      },
+      "Layla Espinel": {
+        "Ambetter": 107,
+        "Cigna": 10,
+        "Molina": 15,
+        "Oscar": 20,
+        "United HC": 20
+      },
+      "Brandon Kaplan": {
+        "Ambetter": 82,
+        "Molina": 6,
+        "Oscar": 16,
+        "United HC": 19
+      },
+      "Danielle Attias": {
+        "Ambetter": 75,
+        "Oscar": 85,
+        "United HC": 40
+      },
+      "Aaron Duarte": {
+        "Ambetter": 65,
+        "Oscar": 185,
+        "United HC": 27
+      },
+      "Jose Lares": {
+        "Ambetter": 53,
+        "Cigna": 10,
+        "Oscar": 22
+      },
+      "Owen Glass": {
+        "Ambetter": 17
+      },
+      "Dalton Myers": {
+        "Ambetter": 6
+      },
+      "Dominick Roberti": {
+        "Ambetter": 1
+      },
+      "Juan Dedios Gallegos Jr": {
+        "Molina": 34
+      },
+      "Ruddy Arteaga Bascope": {
+        "Molina": 34
       }
     }
   }
