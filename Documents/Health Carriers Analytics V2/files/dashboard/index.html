@@ -336,8 +336,8 @@ async function sha256(s){
 const CCLR={Ambetter:"#2A5FBF",Cigna:"#6D3BBF",Molina:"#0A7A52",Oscar:"#B45309","United HC":"#A82060"};
 const CBG={Ambetter:"#EBF1FB",Cigna:"#F0EBFB",Molina:"#EBFAF4",Oscar:"#FEF9EB","United HC":"#FBF0F5"};
 const LEGACY=["Anthony Montenegro","Brandon Kaplan","Felipe Ramirez","Jonathan Diaz","Jose Ariza","Jose Lares","Juan Gallegos","Justin Santa","Kerry St Germain","Layla Espinel","Leysi Espinel","Luis Sosa","Michael Lavernia","Osmayra Vega","Ruddy Arteaga","Yusbell Ortega"];
-const NEW_A=["Nicholas Cuevas","Kirsten Cuevas","Aaron Duarte","Michael Ortiz","Danielle Attias"];
-const ALL_A=[...LEGACY,...NEW_A];
+let NEW_A=["Nicholas Cuevas","Kirsten Cuevas","Aaron Duarte","Michael Ortiz","Danielle Attias"];
+let ALL_A=[...LEGACY,...NEW_A];
 
 /* ─── RUNTIME GLOBALS (set after fetch) ─────────────────── */
 let DATES,CARRIERS,D,LATEST,FIRST,YEAR;
@@ -743,6 +743,8 @@ async function startDashboard(){
     const data=await resp.json();
     DATES=data.dates;
     D=data.D;
+    ALL_A=data.agents;
+    NEW_A=ALL_A.filter(a=>!LEGACY.includes(a));
     LATEST=data.meta.latest_date;
     FIRST=data.meta.first_date;
     CARRIERS=data.carriers;
